@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080d17">
+  <title>Night Researcher · Quant Trading Desk</title>
+  <link rel="stylesheet" href="assets/trading.css">
+  <script type="importmap">
+    {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js"}}
+  </script>
+  <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">NR</span>
+      <span><strong>NIGHT RESEARCHER</strong><small>QUANT TRADING DESK</small></span>
+    </a>
+    <div class="top-status">
+      <span class="mode-pill"><i></i> PAPER ONLY · 模拟账户</span>
+      <span id="connectionStatus" class="connection"><i></i> 正在连接行情</span>
+      <span id="lastUpdate" class="last-update">—</span>
+      <button id="exportTrades" class="ghost-btn">导出成交 CSV</button>
+      <button id="resetAccount" class="ghost-btn danger-ghost">重置模拟账户</button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="hero-row">
+      <div>
+        <div class="eyebrow">REAL-TIME MARKET · SIMULATED EXECUTION</div>
+        <h1>交易指挥中心</h1>
+        <p>实时公开行情 · 盘口深度模拟成交 · 风险闸门 · 策略验证</p>
+      </div>
+      <div class="hero-note"><b>安全模式</b><span>仅模拟现货，不连接钱包、不使用交易密钥、不发送真实订单。</span></div>
+    </section>
+
+    <section class="metric-grid">
+      <article class="metric-card primary-metric"><span>模拟账户净值</span><strong id="equityValue">$10,000.00</strong><small id="equitySub">初始资金 $10,000 USDT</small></article>
+      <article class="metric-card"><span>今日盈亏</span><strong id="dailyPnl">$0.00</strong><small id="dailyPnlSub">按 UTC 日切换</small></article>
+      <article class="metric-card"><span>累计已实现盈亏</span><strong id="realizedPnl">$0.00</strong><small>已完成模拟成交</small></article>
+      <article class="metric-card"><span>未实现盈亏</span><strong id="unrealizedPnl">$0.00</strong><small>按最新行情盯市</small></article>
+      <article class="metric-card"><span>当前回撤</span><strong id="drawdownValue">0.00%</strong><small id="exposureValue">敞口 0.00%</small></article>
+    </section>
+
+    <section class="market-strip" id="marketStrip">
+      <button class="market-card active" data-symbol="BTCUSDT"><span>BTC / USDT</span><b id="ticker-BTCUSDT">—</b><small id="change-BTCUSDT">等待行情</small></button>
+      <button class="market-card" data-symbol="ETHUSDT"><span>ETH / USDT</span><b id="ticker-ETHUSDT">—</b><small id="change-ETHUSDT">等待行情</small></button>
+      <button class="market-card" data-symbol="ORDIUSDT"><span>ORDI / USDT</span><b id="ticker-ORDIUSDT">—</b><small id="change-ORDIUSDT">等待行情</small></button>
+      <button class="market-card" data-symbol="1000SATSUSDT"><span>1000SATS / USDT</span><b id="ticker-1000SATSUSDT">—</b><small id="change-1000SATSUSDT">等待行情</small></button>
+    </section>
+
+    <section class="terminal-grid">
+      <div class="main-column">
+        <article class="panel chart-panel">
+          <div class="panel-head">
+            <div><div class="panel-kicker">MARKET CHART</div><h2 id="chartTitle">BTC / USDT</h2></div>
+            <div class="chart-controls">
+              <select id="symbolSelect" aria-label="交易对">
+                <option value="BTCUSDT">BTC / USDT</option><option value="ETHUSDT">ETH / USDT</option>
+                <option value="ORDIUSDT">ORDI / USDT</option><option value="1000SATSUSDT">1000SATS / USDT</option>
+              </select>
+              <div class="intervals" id="intervalButtons">
+                <button data-interval="1m">1m</button><button data-interval="15m">15m</button>
+                <button data-interval="1h">1h</button><button class="active" data-interval="4h">4h</button><button data-interval="1d">1D</button>
+              </div>
+            </div>
+          </div>
+          <div class="price-line"><strong id="selectedPrice">—</strong><span id="selectedChange">—</span><span id="selectedVolume">24h 成交额 —</span></div>
+          <div id="priceChart" class="price-chart"><div class="chart-loading">正在加载行情图表…</div></div>
+          <div class="chart-foot"><span>数据：Binance 公共现货 API</span><span id="chartUpdated">K 线等待加载</span></div>
+        </article>
+
+        <div class="market-detail-grid">
+          <article class="panel orderbook-panel">
+            <div class="panel-head compact"><div><div class="panel-kicker">LIVE ORDER BOOK</div><h2>盘口深度</h2></div><span id="spreadValue" class="small-pill">价差 —</span></div>
+            <div class="book-head"><span>价格 (USDT)</span><span>数量</span><span>累计</span></div>
+            <div id="askRows" class="book-rows asks"><div class="empty-row">等待卖盘数据…</div></div>
+            <div class="book-mid"><span>中间价</span><b id="midPrice">—</b><span id="imbalanceValue">盘口均衡 —</span></div>
+            <div id="bidRows" class="book-rows bids"><div class="empty-row">等待买盘数据…</div></div>
+            <div class="book-foot">前 20 档公开盘口快照；仅用于模拟成交估算</div>
+          </article>
+
+          <article class="panel tape-panel">
+            <div class="panel-head compact"><div><div class="panel-kicker">PUBLIC TRADE STREAM</div><h2>实时逐笔成交</h2></div><span class="live-dot">LIVE</span></div>
+            <div class="tape-head"><span>价格</span><span>数量</span><span>时间</span></div>
+            <div id="tradeTape" class="trade-tape"><div class="empty-row">等待逐笔成交…</div></div>
+            <div class="book-foot">公开成交流；不代表本账户成交</div>
+          </article>
+        </div>
+
+        <article class="panel portfolio-panel">
+          <div class="panel-head"><div><div class="panel-kicker">PAPER PORTFOLIO</div><h2>模拟持仓</h2></div><span id="availableCash" class="small-pill">可用现金 $10,000</span></div>
+          <div class="table-scroll"><table><thead><tr><th>资产</th><th>持仓数量</th><th>成本均价</th><th>最新价格</th><th>市值</th><th>未实现盈亏</th></tr></thead><tbody id="positionsBody"><tr><td colspan="6" class="empty-cell">当前没有模拟持仓</td></tr></tbody></table></div>
+        </article>
+
+        <div class="bottom-grid">
+          <article class="panel">
+            <div class="panel-head"><div><div class="panel-kicker">OPEN ORDERS</div><h2>当前委托</h2></div></div>
+            <div class="table-scroll"><table><thead><tr><th>交易对</th><th>方向</th><th>类型</th><th>数量</th><th>限价</th><th>操作</th></tr></thead><tbody id="openOrdersBody"><tr><td colspan="6" class="empty-cell">暂无挂单</td></tr></tbody></table></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><div class="panel-kicker">EXECUTION HISTORY</div><h2>模拟成交记录</h2></div><span id="tradeCount" class="small-pill">0 笔</span></div>
+            <div class="table-scroll"><table><thead><tr><th>时间</th><th>交易对</th><th>方向</th><th>成交价</th><th>数量</th><th>手续费</th><th>已实现盈亏</th></tr></thead><tbody id="tradesBody"><tr><td colspan="7" class="empty-cell">尚无成交记录</td></tr></tbody></table></div>
+          </article>
+        </div>
+      </div>
+
+      <aside class="side-column">
+        <article class="panel ticket-panel">
+          <div class="panel-head"><div><div class="panel-kicker">PAPER ORDER TICKET</div><h2>模拟下单</h2></div><span class="small-pill">SPOT</span></div>
+          <div class="side-toggle"><button id="buyTab" class="selected buy" data-side="BUY">买入</button><button id="sellTab" data-side="SELL">卖出</button></div>
+          <label class="field-label">订单类型</label>
+          <select id="orderType" class="field-control"><option value="MARKET">市价单 · 盘口吃单模拟</option><option value="LIMIT">限价单 · 触价模拟</option></select>
+          <div id="limitPriceWrap" class="field-wrap hidden"><label class="field-label">限价 (USDT)</label><input id="limitPrice" class="field-control" type="number" min="0" step="any" placeholder="输入限价"></div>
+          <div class="field-wrap"><label class="field-label">数量 (基础资产)</label><input id="orderQty" class="field-control" type="number" min="0" step="any" placeholder="例如 0.001"></div>
+          <div class="quick-qty"><button data-pct="0.25">25%</button><button data-pct="0.5">50%</button><button data-pct="0.75">75%</button><button data-pct="1">100%</button></div>
+          <div class="estimate-box"><div><span>参考价格</span><b id="estimatePrice">—</b></div><div><span>预计金额</span><b id="estimateNotional">—</b></div><div><span>预计手续费 (0.1%)</span><b id="estimateFee">—</b></div></div>
+          <button id="submitOrder" class="submit-order buy">模拟买入</button>
+          <div id="orderFeedback" class="feedback" role="status">等待盘口数据。下单只会改变本地模拟账户。</div>
+          <div class="ticket-disclaimer">限价单不模拟真实队列优先级；市场单按可见盘口深度估算成交。手续费按 0.1% 计，滑点由盘口价差及深度体现。</div>
+        </article>
+
+        <article class="panel signal-panel">
+          <div class="panel-head compact"><div><div class="panel-kicker">RULE-BASED MARKET STATE</div><h2>市场结构观察</h2></div><span class="small-pill">非交易指令</span></div>
+          <div class="signal-score"><strong id="signalLabel">数据采集中</strong><span id="signalScore">—</span></div>
+          <div class="signal-meter"><i id="signalMeter"></i></div>
+          <ul id="signalFactors" class="signal-factors"><li>等待 K 线与盘口数据</li></ul>
+          <div class="ticket-disclaimer">规则观察模型，未经样本外验证，不构成买卖建议；不会自动下单。</div>
+        </article>
+
+        <article class="panel market3d-panel">
+          <div class="panel-head compact"><div><div class="panel-kicker">MARKET CONSTELLATION</div><h2>3D 市场宇宙</h2></div><span class="small-pill">DRAG TO ROTATE</span></div>
+          <div id="market3d" class="market3d"><div class="chart-loading">3D 场景加载中…</div></div>
+          <div class="legend-row"><span><i class="legend-up"></i>上涨</span><span><i class="legend-down"></i>下跌</span><span><i class="legend-gold"></i>基准</span></div>
+          <div class="ticket-disclaimer">节点表示观察资产，不代表真实资金流向或相关性。拖动旋转，点击节点切换交易对。</div>
+        </article>
+
+        <article class="panel gate-panel">
+          <div class="panel-head compact"><div><div class="panel-kicker">STRATEGY RELEASE GATE</div><h2>策略放行状态</h2></div><span id="gateBadge" class="status-badge blocked">检查中</span></div>
+          <div id="gateSummary" class="gate-summary">正在读取研究引擎结果…</div>
+          <div id="gateRows" class="gate-rows"></div>
+          <div class="ticket-disclaimer">仅允许通过独立 OOS 与风险门禁的策略进入候选池。当前研究报告不等于实盘许可。</div>
+        </article>
+
+        <article class="panel risk-panel">
+          <div class="panel-head compact"><div><div class="panel-kicker">RISK GUARDRAILS</div><h2>账户风险闸门</h2></div><span class="status-badge safe">ACTIVE</span></div>
+          <div class="risk-row"><span>单笔上限</span><b>净值 10%</b></div>
+          <div class="risk-row"><span>总敞口上限</span><b>净值 40%</b></div>
+          <div class="risk-row"><span>单日亏损熔断</span><b>-3%</b></div>
+          <div class="risk-row"><span>账户回撤熔断</span><b>-10%</b></div>
+          <div class="risk-row"><span>杠杆 / 做空</span><b>禁用</b></div>
+          <div class="risk-row"><span>提现 / 钱包连接</span><b>禁用</b></div>
+          <div id="riskState" class="risk-state">风险闸门正常</div>
+        </article>
+      </aside>
+    </section>
+
+    <footer class="page-footer">
+      <span>NIGHT RESEARCHER · PAPER TRADING V1</span>
+      <span>行情来源 Binance Public API · 账户数据仅保存在当前浏览器 localStorage</span>
+      <a href="index.html">返回研究仪表盘</a>
+    </footer>
+  </main>
+
+  <script src="assets/paper-engine.js"></script>
+  <script src="assets/trading.js"></script>
+  <script type="module" src="assets/market3d.js"></script>
+</body>
+</html>
