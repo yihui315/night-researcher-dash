@@ -120,3 +120,14 @@ test("Qwen proxy rejects models outside the current Model Studio allowlist", asy
   }), async () => okResponse());
   assert.equal(response.status, 400);
 });
+
+
+test("Qwen proxy rejects unsupported workspace regions", async () => {
+  const { handleAiChat } = await corePromise;
+  const response = await handleAiChat(makeRequest({
+    provider: "qwen", model: "qwen3.8-max", apiKey: "sk-general-test-123456",
+    region: "hongkong", workspaceId: "ws-test",
+    messages: [{ role: "user", content: "hello" }]
+  }), async () => okResponse());
+  assert.equal(response.status, 400);
+});
