@@ -82,12 +82,13 @@
       return {
         provider,
         model: "MiniMax-M3",
+        region: $("minimaxRegion").value,
         apiKey: $("minimaxApiKey").value.trim()
       };
     }
     return {
       provider,
-      model: "qwen3-coder-plus",
+      model: $("qwenModel").value,
       apiKey: $("qwenApiKey").value.trim(),
       region: $("qwenRegion").value,
       workspaceId: $("qwenWorkspaceId").value.trim()
