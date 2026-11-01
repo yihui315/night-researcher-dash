@@ -5,7 +5,7 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
   const STORAGE_KEY = "night-researcher.paper.v1";
-  const CFG = { initialCash: 10000, feeRate: 0.001, minNotional: 5, maxOrderPct: 0.10, maxExposurePct: 0.40, dailyLossPct: 0.03, maxDrawdownPct: 0.10 };
+  const ALLOWED_SYMBOLS = new Set(["BTCUSDT", "ETHUSDT", "ORDIUSDT", "1000SATSUSDT"]);\n  const CFG = { initialCash: 10000, feeRate: 0.001, minNotional: 5, maxOrderPct: 0.10, maxExposurePct: 0.40, dailyLossPct: 0.03, maxDrawdownPct: 0.10 };
   const round = (n, d) => Number(Number(n).toFixed(d == null ? 10 : d));
   const today = () => new Date().toISOString().slice(0, 10);
   function createAccount(initialCash) {
@@ -120,7 +120,7 @@
     const type = String(params.type || "MARKET").toUpperCase();
     const qty = Number(params.qty);
     const limitPrice = Number(params.limitPrice || 0);
-    if (!/^[A-Z0-9]{2,20}USDT$/.test(symbol)) throw new Error("暂不支持该交易对");
+    if (!ALLOWED_SYMBOLS.has(symbol)) throw new Error("暂不支持该交易对；当前模拟白名单仅包含 BTC、ETH、ORDI、1000SATS");
     if (side !== "BUY" && side !== "SELL") throw new Error("订单方向无效");
     if (type !== "MARKET" && type !== "LIMIT") throw new Error("订单类型无效");
     if (!(qty > 0) || !Number.isFinite(qty)) throw new Error("请输入有效数量");
@@ -187,6 +187,9 @@
       try {
         if (order.side === "BUY") {
           const snap = summary(account, marks);
+          if (snap.dailyLossLocked) throw new Error("触发单日亏损熔断，限价买单拒绝成交");
+          if (snap.drawdownLocked) throw new Error("触发账户回撤熔断，限价买单拒绝成交");
+          if (fill.notional > snap.equity * CFG.maxOrderPct + 1e-8) throw new Error("限价单实际成交金额超过单笔风险上限");
           if (snap.marketValue + reservedBuyExposure(account, order.id) + fill.notional > snap.equity * CFG.maxExposurePct + 1e-8) throw new Error("账户敞口已变化，限价单拒绝成交");
         }
         applyFill(account, order, fill);
@@ -208,5 +211,5 @@
     return true;
   }
   function resetAccount() { return createAccount(); }
-  return { CFG, STORAGE_KEY, createAccount, loadAccount, saveAccount, summary, walkBook, placeOrder, processOpenOrders, cancelOrder, resetAccount };
+  return { CFG, ALLOWED_SYMBOLS, STORAGE_KEY, createAccount, loadAccount, saveAccount, summary, walkBook, placeOrder, processOpenOrders, cancelOrder, resetAccount };
 });
