@@ -162,6 +162,28 @@
   document.addEventListener("DOMContentLoaded", () => {
     if (!$("aiProvider")) return;
     $("aiProvider").addEventListener("change", providerFields);
+    $("paperSelfTestBtn").addEventListener("click", () => {
+      try {
+        const result = window.NRTradingRunPaperSelfTest();
+        const price = value => Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 8 });
+        const money = value => Number(value || 0).toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 4, maximumFractionDigits: 4 });
+        $("paperSelfTestStatus").textContent = "完成 · 独立账户";
+        $("paperSelfTestStatus").className = "small-pill ai-status success";
+        $("paperSelfTestResult").textContent = [
+          "模拟往返完成 · " + result.symbol,
+          "数量：" + price(result.qty),
+          "买入均价：" + price(result.buyPrice) + " · 卖出均价：" + price(result.sellPrice),
+          "买入手续费：" + money(result.buyFee) + " · 卖出手续费：" + money(result.sellFee),
+          "往返净损益：" + money(result.realizedPnl),
+          "模拟成交：" + result.trades + " 笔 · 撮合：" + result.liquidityModel,
+          "独立临时账户；未写入主账户或浏览器存储。"
+        ].join("\n");
+      } catch (error) {
+        $("paperSelfTestStatus").textContent = "未完成";
+        $("paperSelfTestStatus").className = "small-pill ai-status error";
+        $("paperSelfTestResult").textContent = error.message || "模拟自检失败";
+      }
+    });
     $("aiTest").addEventListener("click", () => run("test"));
     $("aiRun").addEventListener("click", () => run("analysis"));
     $("aiClearKey").addEventListener("click", () => {
