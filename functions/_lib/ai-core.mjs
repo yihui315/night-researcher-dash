@@ -41,7 +41,7 @@ function textContent(content) {
     value = content.filter(part => part && part.type === "text" && typeof part.text === "string")
       .map(part => part.text).join("\n");
   }
-  return value.replace(/<think>[\\s\\S]*?<\\/think>/gi, "").trim();
+  return value.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 }
 
 export async function handleAiChat(request, fetchImpl = fetch) {
