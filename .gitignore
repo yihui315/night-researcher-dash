@@ -1,5 +1,5 @@
-# 本地缓存（自动重新下载，无需入库）
-data/
+# 本地缓存（自动重新下载，无需入库）—— 仅忽略根目录 data/，绝不误伤 dashboard/data/
+/data/
 
 # Python
 __pycache__/

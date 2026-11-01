@@ -1,0 +1,295 @@
+{
+  "meta": {
+    "date": "2026-11-01",
+    "generatedAt": "2026-11-01 22:25",
+    "window": "730 天回测窗口 + 90 天样本外(OOS)",
+    "note": "所有数值来自真实公开数据回测；策略均标注「示例/教学，非投资建议」。"
+  },
+  "gates": {
+    "g4": "第四关·超额主门槛(g4)：样本内净收益须跑赢同窗口「买入持有」（相对买入持有 ≥ 0），否则不予放行。",
+    "oos90": "原 Prompt 规定「强制留最近 3 个月(90天)验证」的 OOS 门槛保持不变，未擅自修改协议。"
+  },
+  "cards": [
+    {
+      "sym": "BTC",
+      "tag": "基准",
+      "strat": "FNG_EMA_MR",
+      "inSample": -7.45,
+      "oos": 2.57,
+      "mdd": 30.09,
+      "trades": 56,
+      "excess": -17.75,
+      "pass": false,
+      "reason": "相对买入持有为负（-17.75%），跑输大盘，不予放行（主门槛 g4 未过）"
+    },
+    {
+      "sym": "ETH",
+      "tag": "基准",
+      "strat": "FNG_EMA_MR",
+      "inSample": -0.32,
+      "oos": 0.51,
+      "mdd": 37.78,
+      "trades": 58,
+      "excess": 9.94,
+      "pass": false,
+      "reason": "样本内净收益为负（-0.32%），策略本身不赚钱"
+    },
+    {
+      "sym": "ORDI·BRC20",
+      "tag": "BRC20",
+      "strat": "FNG_EMA_MR",
+      "inSample": 178.55,
+      "oos": 10.23,
+      "mdd": 27.47,
+      "trades": 53,
+      "excess": 296.38,
+      "pass": false,
+      "reason": "样本外仅 1 笔，不足以验证，不予放行"
+    },
+    {
+      "sym": "1000SATS·BRC20",
+      "tag": "BRC20",
+      "strat": "FNG_EMA_MR",
+      "inSample": 63.31,
+      "oos": -3.9,
+      "mdd": 25.97,
+      "trades": 43,
+      "excess": 152.81,
+      "pass": false,
+      "reason": "样本外仅 1 笔，不足以验证，不予放行"
+    },
+    {
+      "sym": "ORDI·BRC20",
+      "tag": "BRC20",
+      "strat": "BRC20_RSI_MR",
+      "inSample": 186.76,
+      "oos": -14.72,
+      "mdd": 64.29,
+      "trades": 112,
+      "excess": 233.89,
+      "pass": false,
+      "reason": "反过拟合标记「可疑」，不予放行"
+    },
+    {
+      "sym": "1000SATS·BRC20",
+      "tag": "BRC20",
+      "strat": "BRC20_RSI_MR",
+      "inSample": -7.73,
+      "oos": -7.74,
+      "mdd": 80.11,
+      "trades": 110,
+      "excess": 80.99,
+      "pass": false,
+      "reason": "样本内净收益为负（-7.73%），策略本身不赚钱"
+    }
+  ],
+  "crossValidation": {
+    "grainFlip": [
+      {
+        "sym": "ORDI·BRC20",
+        "strat": "BRC20_RSI_MR",
+        "h4": 186.76,
+        "d1": -53.9
+      },
+      {
+        "sym": "1000SATS·BRC20",
+        "strat": "BRC20_RSI_MR",
+        "h4": -7.73,
+        "d1": 17.68
+      }
+    ],
+    "vintage": [
+      {
+        "sym": "ORDI·BRC20",
+        "wins": [
+          "-14.7%",
+          "+75.6%",
+          "+45.4%"
+        ],
+        "pos": 2,
+        "neg": 1
+      },
+      {
+        "sym": "1000SATS·BRC20",
+        "wins": [
+          "-7.7%",
+          "+53.8%",
+          "-31.9%"
+        ],
+        "pos": 1,
+        "neg": 2
+      }
+    ],
+    "conclusion": "BRC20「看似惊艳」的样本内收益（ORDI +175%~+187%、SATS 各有盈亏）未通过跨资产/跨周期/跨 vintage 交叉验证 → 框架维持「不予放行」。单看样本内会被严重误导。"
+  },
+  "grid": {
+    "axes": {
+      "oversold": [
+        22,
+        26,
+        30,
+        35,
+        40
+      ],
+      "overbought": [
+        60,
+        65,
+        70,
+        75,
+        80
+      ]
+    },
+    "ordi": {
+      "inProfit": "15/25 (60%)",
+      "oosProfit": "10/25 (40%)",
+      "dispersion": "+92%",
+      "best": {
+        "os": 26,
+        "ob": 70,
+        "inSample": 212.05,
+        "oos": -12.17,
+        "oosTrades": 8
+      },
+      "matrix": [
+        [
+          "+47%/-1%",
+          "+73%/-29%",
+          "+124%/-20%",
+          "-7%/-3%",
+          "-28%/-13%"
+        ],
+        [
+          "+102%/+8%",
+          "+141%/-23%",
+          "+212%/-12%",
+          "+30%/+6%",
+          "+1%/-5%"
+        ],
+        [
+          "+89%/+5%",
+          "+122%/-25%",
+          "+187%/-15%",
+          "+19%/+3%",
+          "-8%/-8%"
+        ],
+        [
+          "+0%/+13%",
+          "+17%/-19%",
+          "+52%/-8%",
+          "-37%/+10%",
+          "-51%/-1%"
+        ],
+        [
+          "-42%/+40%",
+          "-36%/-1%",
+          "-17%/+13%",
+          "-66%/+35%",
+          "-74%/+21%"
+        ]
+      ],
+      "verdict": "过拟合嫌疑高 ❌"
+    },
+    "sats": {
+      "inProfit": "5/25 (20%)",
+      "oosProfit": "15/25 (60%)",
+      "dispersion": "+153%",
+      "best": {
+        "os": 30,
+        "ob": 75,
+        "inSample": 80.14,
+        "oos": -15.58,
+        "oosTrades": 8
+      },
+      "matrix": [
+        [
+          "+1%/+14%",
+          "-43%/+10%",
+          "-15%/-0%",
+          "+65%/-9%",
+          "-73%/+30%"
+        ],
+        [
+          "-18%/+28%",
+          "-53%/+23%",
+          "-31%/+11%",
+          "+35%/+2%",
+          "-78%/+45%"
+        ],
+        [
+          "+10%/+6%",
+          "-38%/+2%",
+          "-8%/-8%",
+          "+80%/-16%",
+          "-71%/+20%"
+        ],
+        [
+          "-50%/+8%",
+          "-72%/+4%",
+          "-58%/-6%",
+          "-20%/-14%",
+          "-87%/+22%"
+        ],
+        [
+          "-63%/-4%",
+          "-79%/-7%",
+          "-69%/-16%",
+          "-39%/-23%",
+          "-90%/+9%"
+        ]
+      ],
+      "verdict": "过拟合嫌疑高 ❌"
+    }
+  },
+  "ecosystem": {
+    "lastDayFee": 63.5,
+    "avg30": 76.3,
+    "avg90": 78.6,
+    "avg365": 65.0,
+    "pct365": 61.0,
+    "mempoolNow": "1 sat/vB（极闲（~1–3 sat/vB，链上冷清））",
+    "spikes90": 0,
+    "eras": [
+      {
+        "label": "前BRC20",
+        "sub": "2018-03~2023-02",
+        "value": 9.4,
+        "days": 1801
+      },
+      {
+        "label": "BRC20",
+        "sub": "2023-03~2024-04",
+        "value": 30.1,
+        "days": 416
+      },
+      {
+        "label": "RUNES",
+        "sub": "2024-04~今",
+        "value": 65.1,
+        "days": 926
+      }
+    ]
+  },
+  "supplementary": {
+    "fundingRate": {
+      "ok": false,
+      "rate": null,
+      "source": null,
+      "demo": false,
+      "reason": "Bybit/Binance 资金费率接口在本环境不可达（需可访问网络；主站 fapi 被墙，Bybit 亦被墙）"
+    },
+    "liquidations": {
+      "ok": false,
+      "source": null,
+      "demo": false,
+      "count": null,
+      "reason": "爆仓数据需 CoinGlass API key（COINGLASS_API_KEY）或可达的 Binance fapi；本环境不可达"
+    },
+    "runes": {
+      "ok": false,
+      "source": null,
+      "demo": false,
+      "reason": "RUNES 代币数据需 UniSat(UNISAT_API_KEY) 或 Dune(DUNE_API_KEY + DUNE_RUNES_QUERY_ID) API key；本环境 runealpha/ordinals 等源均被 Cloudflare 拦截，不可达",
+      "tokens": []
+    }
+  }
+}
