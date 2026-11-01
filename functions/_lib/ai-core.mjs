@@ -1,7 +1,6 @@
 const REGION_HOSTS = Object.freeze({
   singapore: "ap-southeast-1",
   beijing: "cn-beijing",
-  hongkong: "cn-hongkong",
   tokyo: "ap-northeast-1",
   frankfurt: "eu-central-1",
   virginia: "us-east-1"
