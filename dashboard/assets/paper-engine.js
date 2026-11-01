@@ -120,7 +120,7 @@
     const type = String(params.type || "MARKET").toUpperCase();
     const qty = Number(params.qty);
     const limitPrice = Number(params.limitPrice || 0);
-    if (!/^[A-Z0-9]{4,20}USDT$/.test(symbol)) throw new Error("暂不支持该交易对");
+    if (!/^[A-Z0-9]{2,20}USDT$/.test(symbol)) throw new Error("暂不支持该交易对");
     if (side !== "BUY" && side !== "SELL") throw new Error("订单方向无效");
     if (type !== "MARKET" && type !== "LIMIT") throw new Error("订单类型无效");
     if (!(qty > 0) || !Number.isFinite(qty)) throw new Error("请输入有效数量");
