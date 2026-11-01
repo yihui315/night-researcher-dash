@@ -66,8 +66,9 @@ test("enforces the per-order risk cap before paper execution", async ({ page }) 
   await page.locator("#orderQty").fill("0.02");
   await page.locator("#submitOrder").click();
   await expect(page.locator("#orderFeedback")).toContainText("单笔风险上限");
-  const account = await page.evaluate(() => JSON.parse(localStorage.getItem("night-researcher.paper.v1")));
-  expect(account.trades).toHaveLength(0);
+  const stored = await page.evaluate(() => localStorage.getItem("night-researcher.paper.v1"));
+  if (stored) expect(JSON.parse(stored).trades).toHaveLength(0);
+  await expect(page.locator("#equityValue")).toContainText("10,000");
 });
 
 test("MiniMax and Qwen key forms call the same-origin AI endpoint without persisting keys", async ({ page }) => {
