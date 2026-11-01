@@ -257,56 +257,106 @@ SIDE_COST = 0.0015  # 单边 0.15% (手续费0.1% + 滑点0.05%)
 
 def simulate(strategy, ctx, oos_split_idx):
     """
-    逐根 K 线驱动 strategy.step(i, ctx) → 'LONG'/'SHORT'/'FLAT'/'HOLD'。
-    仅在仓位变化时计单边成本。返回 trades 列表与汇总。
+    事件驱动回测：收盘产生信号，下一根 K 线开盘成交；止损使用当根 OHLC 检查。
+    每次调用克隆策略实例，避免回测/敏感性分析之间发生状态污染。
+    成本仍按单边 SIDE_COST 计入；该模型是 OHLC 级近似，不等同逐笔订单簿回放。
     """
     bars = ctx.bars
     n = len(bars)
+    params = dict(getattr(strategy, "params", {}) or {})
+    runtime = strategy.__class__(**params)
     pos = 0
     entry_price = 0.0
     entry_i = 0
     trades = []
-    equity = [1.0]  # 净值曲线（每笔交易后更新）
-    for i in range(n):
-        action = strategy.step(i, ctx)
-        price = bars[i]["c"]
-        if action == "LONG" and pos <= 0:
-            if pos < 0:  # 先平空
-                ret = (entry_price / price - 1) - 2 * SIDE_COST
-                trades.append(_mk_trade("SHORT", entry_price, price, entry_i, i, ret, ctx, False))
-                equity.append(equity[-1] * (1 + ret))
-            entry_price = price
-            entry_i = i
-            pos = 1
-        elif action == "SHORT" and pos >= 0:
-            if pos > 0:  # 先平多
-                ret = (price / entry_price - 1) - 2 * SIDE_COST
-                trades.append(_mk_trade("LONG", entry_price, price, entry_i, i, ret, ctx, False))
-                equity.append(equity[-1] * (1 + ret))
-            entry_price = price
-            entry_i = i
-            pos = -1
-        elif action == "FLAT" and pos != 0:
-            if pos > 0:
-                ret = (price / entry_price - 1) - 2 * SIDE_COST
-                trades.append(_mk_trade("LONG", entry_price, price, entry_i, i, ret, ctx, False))
-            else:
-                ret = (entry_price / price - 1) - 2 * SIDE_COST
-                trades.append(_mk_trade("SHORT", entry_price, price, entry_i, i, ret, ctx, False))
-            equity.append(equity[-1] * (1 + ret))
-            pos = 0
-            entry_price = 0.0
-    # 强平末尾未平仓
-    if pos != 0:
-        price = bars[-1]["c"]
+    equity_realized = 1.0
+    equity_curve = []
+    pending = None
+
+    def close_position(price, idx, forced=False):
+        nonlocal pos, entry_price, entry_i, equity_realized
+        if pos == 0:
+            return
         if pos > 0:
             ret = (price / entry_price - 1) - 2 * SIDE_COST
-            trades.append(_mk_trade("LONG", entry_price, price, entry_i, n - 1, ret, ctx, True))
+            direction = "LONG"
         else:
             ret = (entry_price / price - 1) - 2 * SIDE_COST
-            trades.append(_mk_trade("SHORT", entry_price, price, entry_i, n - 1, ret, ctx, True))
-        equity.append(equity[-1] * (1 + ret))
-    return _summarize(trades, equity, oos_split_idx, bars)
+            direction = "SHORT"
+        trades.append(_mk_trade(direction, entry_price, price, entry_i, idx, ret, ctx, forced))
+        equity_realized = max(0.0, equity_realized * (1 + ret))
+        pos = 0
+        entry_price = 0.0
+        entry_i = 0
+
+    def open_position(direction, price, idx):
+        nonlocal pos, entry_price, entry_i
+        pos = 1 if direction == "LONG" else -1
+        entry_price = price
+        entry_i = idx
+        runtime.position = direction
+        runtime.entry_price = price
+        runtime.entry_i = idx
+
+    for i, bar in enumerate(bars):
+        # 前一根收盘产生的信号，在本根开盘执行。
+        if pending == "FLAT":
+            close_position(bar["o"], i)
+            runtime.position = "FLAT"
+        elif pending in ("LONG", "SHORT"):
+            wanted = 1 if pending == "LONG" else -1
+            if pos != wanted:
+                if pos != 0:
+                    close_position(bar["o"], i)
+                open_position(pending, bar["o"], i)
+        pending = None
+
+        # 止损优先于收盘信号；跳空时按开盘价，盘中触发按止损价。
+        stopped = False
+        stop_pct = float(getattr(runtime, "stop_pct", 0) or 0)
+        if pos == 1 and stop_pct > 0:
+            stop_price = entry_price * (1 - stop_pct)
+            if bar["o"] <= stop_price:
+                close_position(bar["o"], i)
+                stopped = True
+            elif bar["l"] <= stop_price:
+                close_position(stop_price, i)
+                stopped = True
+        elif pos == -1 and stop_pct > 0:
+            stop_price = entry_price * (1 + stop_pct)
+            if bar["o"] >= stop_price:
+                close_position(bar["o"], i)
+                stopped = True
+            elif bar["h"] >= stop_price:
+                close_position(stop_price, i)
+                stopped = True
+        if stopped:
+            runtime.position = "FLAT"
+
+        # 每根 K 线收盘盯市，未平仓仓位计入浮动回撤。
+        if pos == 0:
+            equity_curve.append(equity_realized)
+        else:
+            mark = bar["c"]
+            gross = (mark / entry_price - 1) if pos > 0 else (entry_price / mark - 1)
+            equity_curve.append(max(0.0, equity_realized * (1 + gross - SIDE_COST)))
+
+        # 使用当前 K 线收盘可见的信息产生下一根 K 线的待执行信号。
+        if not stopped:
+            action = runtime.step(i, ctx)
+            if action in ("LONG", "SHORT", "FLAT"):
+                pending = action
+
+    # 最后一根 K 线没有下一根开盘价；未平仓头寸按最后收盘价强制估值退出。
+    if pos != 0 and n:
+        close_position(bars[-1]["c"], n - 1, True)
+        equity_curve[-1] = equity_realized
+    if not equity_curve:
+        equity_curve = [1.0]
+
+    result = _summarize(trades, equity_curve, oos_split_idx, bars)
+    result["execution_model"] = "next_bar_open_with_intrabar_ohlc_stops"
+    return result
 
 
 def buy_and_hold_return(bars):
@@ -482,7 +532,7 @@ def _summarize(trades, equity, oos_split_idx, bars):
     def stats(sub):
         if not sub:
             return {"n": 0, "win": 0, "win_rate": None, "avg_win": None,
-                    "avg_loss": None, "profit_factor": None, "net": None,
+                    "avg_loss": None, "profit_factor": None, "expectancy": None, "payoff_ratio": None, "net": None,
                     "regime": {}}
         wins = [t["ret"] for t in sub if t["ret"] > 0]
         losses = [t["ret"] for t in sub if t["ret"] <= 0]
@@ -506,7 +556,7 @@ def _summarize(trades, equity, oos_split_idx, bars):
             reg[k]["net"] -= 1.0
         return {"n": n, "win": len(wins), "win_rate": win_rate,
                 "avg_win": avg_win, "avg_loss": avg_loss,
-                "profit_factor": pf, "net": net, "regime": reg}
+                "profit_factor": pf, "expectancy": sum(t["ret"] for t in sub) / n, "payoff_ratio": (avg_win / abs(avg_loss) if avg_loss < 0 else None), "net": net, "regime": reg}
 
     # 最大回撤（基于 equity 曲线）
     peak = equity[0]
@@ -598,15 +648,14 @@ def evaluate_gates(strategy, summary, ctx):
 
 
 def _sensitivity(strategy, ctx):
-    """对策略关键参数做 ±扰动，比较样本内净收益。"""
+    """对策略关键参数做 ±扰动；每次都使用全新实例，避免状态复用。"""
     base_cls = strategy.__class__
-    base_params = dict(getattr(strategy, "params", {}))
-    # 找可作 ±扰动的数字参数
+    base_params = dict(getattr(strategy, "params", {}) or {})
     numeric = {k: v for k, v in base_params.items() if isinstance(v, (int, float))}
     if not numeric:
         return {"suspect": False, "note": "无可调数字参数", "swings": {}}
-    # 用样本内部分快速重跑（传 ctx 全量，但仅看 net 作为代理）
-    base_sum = simulate(strategy, ctx, len(ctx.bars))  # 复用全量仅取 net 量级
+
+    base_sum = simulate(base_cls(**base_params), ctx, len(ctx.bars))
     base_net = base_sum["insample"]["net"] if base_sum["insample"]["n"] else base_sum["n_trades"]
     swings = {}
     suspect = False
@@ -623,12 +672,12 @@ def _sensitivity(strategy, ctx):
                 variant = base_cls(**{**base_params, k: nv})
             except Exception:
                 continue
-            s = simulate(variant, ctx, len(ctx.bars))
-            vnet = s["insample"]["net"] if s["insample"]["n"] else 0.0
+            result = simulate(variant, ctx, len(ctx.bars))
+            vnet = result["insample"]["net"] if result["insample"]["n"] else 0.0
             swings[f"{k}:{v}->{nv}"] = round(vnet, 4)
             if base_net not in (0, None):
                 rel = abs(vnet - base_net) / abs(base_net)
-                if rel > 1.0 or (base_net > 0) != (vnet > 0):
+                if rel > 0.5 or (base_net > 0) != (vnet > 0):
                     suspect = True
     note = "调参后净收益变化>50%或变号，标「可疑」" if suspect else "调参敏感性在可接受范围"
     return {"suspect": suspect, "note": note, "swings": swings}

@@ -28,7 +28,7 @@ night_researcher/
 
 ## 3. 硬约束（务必遵守）
 
-- ❌ 不写下单代码、不给买卖建议（仅研究/回测）。
+- ❌ 不写真实资金下单代码、不发送真实订单；允许独立的本地模拟撮合与模拟风控，不连接钱包或交易所账户。
 - ❌ 不爬 X(Twitter) 等社媒；想法池由你**粘贴原帖链接 + 观点**提供。
 - ⚠️ 拿不到的数据（如永续资金费率）标「未知」，**绝不虚构**。
 
@@ -158,3 +158,41 @@ class MyStrategy:
 | ③ 超额收益升为主放行指标 | ✅ 完成 | 新增 g4_excess（§10），BTC 等跑输大盘已被正确判负 |
 
 > 免责声明：示例/教学，非投资建议。据此实盘盈亏自负。
+
+
+## 12. 交易指挥中心 V1（模拟账户）
+
+- 新增 dashboard/trading.html，保留原研究仪表盘，并从首页进入交易工作台。
+- 实时行情：Binance 公共 REST + WebSocket，覆盖 BTC、ETH、ORDI、1000SATS 现货。
+- 盘口与逐笔：展示公开盘口和实时成交流；市价模拟单按可见盘口深度逐档计算成交均价，盘口深度不足时拒绝模拟成交。
+- 模拟账户：初始 10,000 USDT；本地浏览器持久化；仅现货多头，不支持杠杆、裸卖空、钱包连接或真实下单。
+- 限价单：只在公开盘口跨价且可见深度足够时模拟成交；不模拟真实交易所队列优先级。
+- 风险闸门：单笔不超过净值 10%、总敞口不超过 40%、单日亏损 3% 熔断、账户回撤 10% 熔断；卖出操作保留以便降低风险。
+- 策略放行：直接读取 dashboard/data/research.json；当前没有通过门禁的策略时明确显示「未放行」，不将回测收益包装成实盘能力。
+- 3D 市场宇宙：Three.js 节点仅用于资产态势展示，不代表真实资金流或相关性。
+- 本地预览：cd dashboard && python -m http.server 8765，然后访问 http://localhost:8765/trading.html。
+- 质量检查：npm test；python -m unittest discover -s tests -p "test_*.py"。
+
+当前模拟账户数据仅保存在打开终端的浏览器 localStorage，清除浏览器数据会清空账户；跨设备同步和服务端账户账本属于下一阶段。此版本不连接真实交易所账户，不接受交易 API Key。
+
+
+## 13. AI 研究副驾驶与浏览器联调
+
+- `dashboard/trading.html` 新增 MiniMax M3 / Qwen3-Coder-Plus API 输入界面、连接测试和研究分析窗口。
+- `functions/api/ai/chat.js` 是 Cloudflare Pages 同站 API；`functions/_lib/ai-core.mjs` 负责校验和转发。
+- API Key 仅在当前页面内存中保留，按用户点击发起请求时经 HTTPS 发送到同站函数，再转发至所选模型服务商；应用不写入 localStorage、Cookie、Git 或日志。刷新页面后需要重新输入。
+- MiniMax：OpenAI 兼容端点 `https://api.minimax.io/v1`，模型 `MiniMax-M3`。
+- Qwen：使用 Model Studio 通用 API Key（`sk-`）和与密钥同区域的 Workspace ID；默认模型 `qwen3-coder-plus`。
+- **不要把 Qwen Coding Plan 的 `sk-sp-` 密钥填入网页**。该套餐仅供 Qwen Code 等交互式编程工具使用，不用于本应用后端。
+- AI 只生成研究意见，不决定策略是否放行，不生成真实交易指令。研究门禁仍由程序计算。
+- 收益研究与模拟验收路线见 `盈利研究计划.md`。
+
+### 质量测试
+
+```bash
+npm test
+npm run test:e2e
+python -m unittest discover -s tests -p "test_*.py"
+```
+
+浏览器 E2E 使用 Playwright + 模拟 Binance 公共行情响应，验证页面行情加载、盘口驱动的模拟成交、单笔风险拒单、MiniMax/Qwen 输入界面和密钥不落地。该测试不替代用户输入真实 API Key 后的供应商连通性测试。

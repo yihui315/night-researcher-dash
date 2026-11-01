@@ -1,0 +1,52 @@
+name: Quality Gates
+on:
+  pull_request:
+  push:
+    branches: ["main", "feat/**"]
+permissions:
+  contents: write
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Python syntax
+        run: python -m compileall -q backtest_engine.py strategies.py run_research.py brc20_runes_monitor.py connectors_extra.py
+      - name: Backtest execution tests
+        run: python -m unittest discover -s tests -p "test_*.py"
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install browser test dependencies
+        run: npm install --no-audit --no-fund
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Paper trading and AI proxy tests
+        run: npm test
+      - name: Browser end-to-end tests
+        run: npm run test:e2e
+      - name: Publish browser test diagnostics to a temporary branch
+        if: failure() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIAG_BRANCH: diagnostics/e2e-${{ github.run_id }}
+        run: |
+          if [ -f test-results/report.json ]; then
+            REPORT="$(base64 -w0 test-results/report.json)"
+          else
+            REPORT="$(printf '%s' '{"error":"Playwright report was not generated"}' | base64 -w0)"
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f "ref=refs/heads/$DIAG_BRANCH" -f "sha=$GITHUB_SHA"
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/.diagnostics/e2e-report.json" \
+            -f "message=ci: capture Playwright diagnostics [skip ci]" \
+            -f "content=$REPORT" -f "branch=$DIAG_BRANCH"
