@@ -275,6 +275,41 @@
     await Promise.allSettled([refreshKlines(), refreshDepth()]);
     connectSocket(); updateEstimate();
   }
+
+  window.NRTradingRunPaperSelfTest = function () {
+    if (!state.book.asks.length || !state.book.bids.length) throw new Error("等待实时盘口加载完成后再运行");
+    const symbol = state.symbol;
+    const bestAsk = Number(state.book.asks[0][0]);
+    const askDepth = state.book.asks.slice(0, 5).reduce((sum, level) => sum + Number(level[1] || 0), 0);
+    const bidDepth = state.book.bids.slice(0, 5).reduce((sum, level) => sum + Number(level[1] || 0), 0);
+    if (!(bestAsk > 0) || !(askDepth > 0) || !(bidDepth > 0)) throw new Error("盘口数据无效");
+    const step = ({ BTCUSDT: 0.000001, ETHUSDT: 0.00001, ORDIUSDT: 0.01, "1000SATSUSDT": 1 })[symbol] || 0.000001;
+    const rawQty = Math.min(25 / bestAsk, askDepth * 0.01, bidDepth * 0.01);
+    const qty = Number((Math.floor(rawQty / step + 1e-9) * step).toFixed(8));
+    if (!(qty > 0) || qty * bestAsk < window.NRPaper.CFG.minNotional) {
+      throw new Error("当前可见盘口深度不足以完成最低 $5 的往返自检");
+    }
+    const sandbox = window.NRPaper.createAccount(10000);
+    const snapshotMarks = marks();
+    const buy = window.NRPaper.placeOrder(sandbox, { symbol, side: "BUY", type: "MARKET", qty }, state.book, snapshotMarks);
+    if (buy.status !== "FILLED") throw new Error("临时账户买入自检未成交");
+    const sell = window.NRPaper.placeOrder(sandbox, { symbol, side: "SELL", type: "MARKET", qty }, state.book, snapshotMarks);
+    if (sell.status !== "FILLED") throw new Error("临时账户卖出自检未成交");
+    const result = window.NRPaper.summary(sandbox, snapshotMarks);
+    return {
+      symbol, qty,
+      buyPrice: buy.order.avgFillPrice,
+      sellPrice: sell.order.avgFillPrice,
+      buyFee: buy.order.fee,
+      sellFee: sell.order.fee,
+      realizedPnl: sell.order.realizedPnl,
+      endingCash: sandbox.cash,
+      trades: sandbox.trades.length,
+      liquidityModel: "visible-orderbook-walk",
+      persisted: false
+    };
+  };
+
   window.NRTradingSelectSymbol = selectSymbol;
   function connectSocket() {
     if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
