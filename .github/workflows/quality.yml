@@ -5,6 +5,7 @@ on:
     branches: ["main", "feat/**"]
 permissions:
   contents: read
+  issues: write
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -34,3 +35,52 @@ jobs:
         run: npm test
       - name: Browser end-to-end tests
         run: npm run test:e2e
+      - name: Publish browser test diagnostics to PR
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = 'test-results/report.json';
+            if (!fs.existsSync(reportPath)) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: 'Playwright E2E failed before a JSON report was produced. Check the workflow run: ' + context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId
+              });
+              return;
+            }
+            const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+            const failures = [];
+            function walk(suites) {
+              for (const suite of (suites || [])) {
+                for (const spec of (suite.specs || [])) {
+                  for (const test of (spec.tests || [])) {
+                    for (const result of (test.results || [])) {
+                      if (result.status !== 'passed') {
+                        failures.push({
+                          title: spec.title,
+                          status: result.status,
+                          error: (result.error && (result.error.message || result.error.stack)) || 'No error detail'
+                        });
+                      }
+                    }
+                  }
+                }
+                walk(suite.suites);
+              }
+            }
+            walk(report.suites);
+            const body = [
+              '### Night Researcher Playwright E2E diagnostics',
+              'Run: ' + context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId,
+              'Failed/unfinished tests: ' + failures.length,
+              ...failures.map((f, i) => (i + 1) + '. **' + f.title + '** (' + f.status + ')\\n\\n```text\\n' + String(f.error).slice(0, 2500) + '\\n```')
+            ].join('\\n\\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body.slice(0, 12000)
+            });
