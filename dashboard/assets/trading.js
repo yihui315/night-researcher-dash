@@ -63,6 +63,7 @@
     const updates = window.NRPaper.processOpenOrders(state.account, state.symbol, state.book, marks());
     if (updates.length) { persist(); setFeedback("限价委托状态已更新：" + updates.map(x => x.id + " " + x.status).join("、"), "success"); }
     updateEstimate();
+    renderAccount();
   }
   async function refreshKlines() {
     const d = await getJSON(API + "/klines?symbol=" + state.symbol + "&interval=" + state.interval + "&limit=240");
@@ -294,6 +295,7 @@
             state.book = { bids: d.bids, asks: d.asks }; renderBook();
             const updates = window.NRPaper.processOpenOrders(state.account, state.symbol, state.book, marks());
             if (updates.length) persist();
+            renderAccount();
           }
           setText("lastUpdate", "更新 " + new Date().toLocaleTimeString("zh-CN", { hour12: false }));
         } catch (_) {}
