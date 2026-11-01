@@ -49,3 +49,32 @@ test("summary marks open positions to market and reports exposure", () => {
   assert.ok(s.unrealizedPnl > 0);
   assert.ok(s.exposurePct > 0);
 });
+
+test("paper engine rejects symbols outside the explicit watchlist", () => {
+  const account = Paper.createAccount(10000);
+  assert.throws(() => Paper.placeOrder(account, { symbol: "DOGEUSDT", side: "BUY", type: "MARKET", qty: 1 }, book(0.1, 0.1001, 1000), { DOGEUSDT: 0.1001 }), /白名单/);
+});
+
+test("pending limit buy is rejected if daily loss circuit breaker activates before fill", () => {
+  const account = Paper.createAccount(10000);
+  const order = Paper.placeOrder(account, { symbol: "BTCUSDT", side: "BUY", type: "LIMIT", qty: 0.001, limitPrice: 90000 }, book(89900, 90100, 2), { BTCUSDT: 90000 });
+  assert.equal(order.status, "OPEN");
+  account.cash -= 400;
+  const updates = Paper.processOpenOrders(account, "BTCUSDT", book(89900, 89950, 2), { BTCUSDT: 90000 });
+  assert.equal(updates[0].status, "REJECTED");
+  assert.match(updates[0].reason, /单日亏损熔断/);
+  assert.equal(account.trades.length, 0);
+  assert.equal(account.reservedCash, 0);
+});
+
+test("pending limit buy is rejected if max drawdown circuit breaker activates before fill", () => {
+  const account = Paper.createAccount(10000);
+  const order = Paper.placeOrder(account, { symbol: "BTCUSDT", side: "BUY", type: "LIMIT", qty: 0.001, limitPrice: 90000 }, book(89900, 90100, 2), { BTCUSDT: 90000 });
+  assert.equal(order.status, "OPEN");
+  account.equityPeak = 12000;
+  const updates = Paper.processOpenOrders(account, "BTCUSDT", book(89900, 89950, 2), { BTCUSDT: 10000 });
+  assert.equal(updates[0].status, "REJECTED");
+  assert.match(updates[0].reason, /账户回撤熔断/);
+  assert.equal(account.trades.length, 0);
+  assert.equal(account.reservedCash, 0);
+});
