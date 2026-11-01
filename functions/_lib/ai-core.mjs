@@ -3,13 +3,17 @@ const REGION_HOSTS = Object.freeze({
   beijing: "cn-beijing",
   hongkong: "cn-hongkong",
   tokyo: "ap-northeast-1",
+  frankfurt: "eu-central-1",
   virginia: "us-east-1"
 });
 
-const MODELS = Object.freeze({
-  minimax: "MiniMax-M3",
-  qwen: "qwen3-coder-plus"
+const MINIMAX_ENDPOINTS = Object.freeze({
+  china: "https://api.minimaxi.com/v1/chat/completions",
+  global: "https://api.minimax.io/v1/chat/completions"
 });
+const MINIMAX_MODEL = "MiniMax-M3";
+const QWEN_MODELS = Object.freeze(["qwen3.7-plus", "qwen3.8-max", "qwen3.6-plus"]);
+const DEFAULT_QWEN_MODEL = "qwen3.7-plus";
 
 const SYSTEM_PROMPT = [
   "你是 Night Researcher 的量化研究副驾驶。",
@@ -64,15 +68,20 @@ export async function handleAiChat(request, fetchImpl = fetch) {
 
   const provider = String(body.provider || "");
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
-  const model = MODELS[provider];
-  if (!model) return json({ error: "不支持的 AI 服务商" }, 400);
-  if (body.model && body.model !== model) return json({ error: "模型标识不匹配" }, 400);
+  if (!["minimax", "qwen"].includes(provider)) return json({ error: "不支持的 AI 服务商" }, 400);
   if (apiKey.length < 12 || apiKey.length > 500) return json({ error: "请检查 API Key" }, 400);
 
   let endpoint;
+  let model;
   if (provider === "minimax") {
-    endpoint = "https://api.minimax.io/v1/chat/completions";
+    model = MINIMAX_MODEL;
+    if (body.model && body.model !== model) return json({ error: "模型标识不匹配" }, 400);
+    const minimaxRegion = String(body.region || "china");
+    endpoint = MINIMAX_ENDPOINTS[minimaxRegion];
+    if (!endpoint) return json({ error: "请选择 MiniMax API Key 所属区域" }, 400);
   } else {
+    model = body.model ? String(body.model) : DEFAULT_QWEN_MODEL;
+    if (!QWEN_MODELS.includes(model)) return json({ error: "当前 Qwen 模型未开放在此接口白名单中" }, 400);
     if (apiKey.startsWith("sk-sp-")) {
       return json({
         error: "检测到 Qwen Coding Plan 套餐密钥（sk-sp-）。该密钥仅限 Qwen Code 等交互式编程工具，不可用于本应用后端。请改用 Model Studio 通用 API Key（sk-，按量计费）。"
