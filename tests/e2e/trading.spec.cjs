@@ -59,6 +59,14 @@ test("loads public market data and executes a depth-based paper market buy", asy
   expect(account.trades).toHaveLength(1);
   expect(account.trades[0].liquidityModel).toBe("visible-orderbook-walk");
   expect(account.cash).toBeLessThan(10000);
+
+  const beforeSelfTest = { cash: account.cash, trades: account.trades.length };
+  await page.locator("#paperSelfTestBtn").click();
+  await expect(page.locator("#paperSelfTestStatus")).toContainText("完成");
+  await expect(page.locator("#paperSelfTestResult")).toContainText("模拟往返完成");
+  const afterSelfTest = await page.evaluate(() => JSON.parse(localStorage.getItem("night-researcher.paper.v1")));
+  expect(afterSelfTest.cash).toBe(beforeSelfTest.cash);
+  expect(afterSelfTest.trades).toHaveLength(beforeSelfTest.trades);
 });
 
 test("enforces the per-order risk cap before paper execution", async ({ page }) => {
