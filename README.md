@@ -181,8 +181,8 @@ class MyStrategy:
 - `dashboard/trading.html` 新增 MiniMax M3 / Qwen3-Coder-Plus API 输入界面、连接测试和研究分析窗口。
 - `functions/api/ai/chat.js` 是 Cloudflare Pages 同站 API；`functions/_lib/ai-core.mjs` 负责校验和转发。
 - API Key 仅在当前页面内存中保留，按用户点击发起请求时经 HTTPS 发送到同站函数，再转发至所选模型服务商；应用不写入 localStorage、Cookie、Git 或日志。刷新页面后需要重新输入。
-- MiniMax：OpenAI 兼容端点 `https://api.minimax.io/v1`，模型 `MiniMax-M3`。
-- Qwen：使用 Model Studio 通用 API Key（`sk-`）和与密钥同区域的 Workspace ID；默认模型 `qwen3-coder-plus`。
+- MiniMax：模型 `MiniMax-M3`；中国站 `https://api.minimaxi.com/v1`、国际站 `https://api.minimax.io/v1`，API Key 与区域必须匹配。
+- Qwen：使用 Model Studio 通用 API Key（`sk-`）和与密钥同区域的 Workspace ID；默认模型可选 `qwen3.7-plus`、`qwen3.8-max`、`qwen3.6-plus`，默认 `qwen3.7-plus`（具备代码与研究能力）。
 - **不要把 Qwen Coding Plan 的 `sk-sp-` 密钥填入网页**。该套餐仅供 Qwen Code 等交互式编程工具使用，不用于本应用后端。
 - AI 只生成研究意见，不决定策略是否放行，不生成真实交易指令。研究门禁仍由程序计算。
 - 收益研究与模拟验收路线见 `盈利研究计划.md`。
