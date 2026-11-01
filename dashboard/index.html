@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>夜班交易研究员 · 实时仪表盘</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">🌙</div>
+      <div>
+        <h1>夜班交易研究员 · 实时仪表盘</h1>
+        <div class="sub">BTC / ETH / BRC20(ORDI·SATS) · 量化研究 + 生态监测</div>
+      </div>
+    </div>
+    <div class="controls">
+      <span class="clock">最后更新：<span id="lastUpdate">—</span></span>
+      <button id="autoBtn" class="btn">⏸ 自动刷新：开</button>
+      <select id="periodSel" class="sel">
+        <option value="15000">15s</option>
+        <option value="30000">30s</option>
+        <option value="60000" selected>60s</option>
+      </select>
+      <button id="refreshBtn" class="btn primary">↻ 刷新</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>① 实时市场快照</h2>
+      <div class="snap-grid">
+        <div class="snap" data-sym="BTC"><div class="name">BTC</div><div class="price">—</div><div class="chg">—</div><div class="sub">Binance 现货</div></div>
+        <div class="snap" data-sym="ETH"><div class="name">ETH</div><div class="price">—</div><div class="chg">—</div><div class="sub">Binance 现货</div></div>
+        <div class="snap" data-sym="ORDI"><div class="name">ORDI·BRC20</div><div class="price">—</div><div class="chg">—</div><div class="sub">Binance 现货</div></div>
+        <div class="snap" data-sym="1000SATS"><div class="name">1000SATS·BRC20</div><div class="price">—</div><div class="chg">—</div><div class="sub">Binance 现货</div></div>
+        <div class="snap" data-sym="FNG"><div class="name">恐贪指数</div><div class="price">—</div><div class="chg">—</div><div class="sub">alternative.me</div></div>
+        <div class="snap" data-sym="STABLE"><div class="name">稳定币总供应</div><div class="price">—</div><div class="chg">—</div><div class="sub">DefiLlama</div></div>
+        <div class="snap" data-sym="MEMPOOL"><div class="name">BTC 链上费率</div><div class="price">—</div><div class="chg">—</div><div class="sub">mempool.space</div></div>
+        <div class="snap" data-sym="FEES"><div class="name">BTC 日手续费</div><div class="price">—</div><div class="chg">—</div><div class="sub">DefiLlama</div></div>
+        <div class="snap" data-sym="FR"><div class="name">BTC 永续资金费率</div><div class="price">—</div><div class="chg">—</div><div class="sub">Binance 永续</div></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>② 价格 · 指标（实时）</h2>
+      <div class="tabs" id="symTabs"></div>
+      <div class="tabs" id="intTabs"></div>
+      <div class="chart-wrap"><canvas id="klineMain" class="chart-main"></canvas></div>
+      <div class="chart-wrap"><canvas id="klineVol" class="chart-sm"></canvas></div>
+      <div class="chart-wrap"><canvas id="klineRsi" class="chart-sm"></canvas></div>
+    </section>
+
+    <section class="panel">
+      <h2>③ BRC20 / RUNES 生态监测 <span class="muted">（BTC L1 手续费代理）</span></h2>
+      <div class="two-col">
+        <div>
+          <div class="chart-title">Bitcoin 每日网络手续费（近 365 天）</div>
+          <div class="chart-wrap"><canvas id="feeLine" class="chart-main"></canvas></div>
+        </div>
+        <div>
+          <div class="chart-title">时代日均手续费对比</div>
+          <div class="chart-wrap"><canvas id="eraBars" class="chart-main"></canvas></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>④ 研究框架结论 <span class="muted">（实时 JSON · 由 run_research.py 生成）</span></h2>
+      <div class="sub-controls">
+        <span class="muted" id="researchTs">—</span>
+        <button id="researchRefresh" class="btn">↻ 刷新研究结论</button>
+        <label class="chk"><input type="checkbox" id="researchAuto" checked /> 自动(5m)</label>
+      </div>
+      <div id="research"></div>
+    </section>
+
+    <footer class="footer">
+      <p>数据来源：Binance 镜像 · alternative.me · DefiLlama · mempool.space（浏览器直连，实时拉取）。</p>
+      <p class="warn">⚠ 免责声明：本面板仅用于量化研究方法论演示。所有策略均标注「示例/教学，非投资建议」。不写下单代码、不触发交易、不爬取 X(Twitter)、不给买卖建议。历史回测 ≠ 未来收益。</p>
+    </footer>
+  </main>
+
+  <script src="assets/charts.js"></script>
+  <script src="assets/research.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>

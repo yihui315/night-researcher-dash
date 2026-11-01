@@ -1,0 +1,56 @@
+# Night Researcher · 每日自动重跑 + 部署
+# ---------------------------------------------------------------------------
+# 作用：定时（UTC 16:00 / 北京时间 00:00）或手动重跑 run_research.py，把最新
+# research.json 推回仓库。Cloudflare Pages 与仓库连通后会**自动重新部署**静态站点。
+#
+# 前置（一次性，用户在 GitHub 仓库 Settings → Secrets 配置，可不填）：
+#   UNISAT_API_KEY        RUNES 代币榜（UniSat）
+#   DUNE_API_KEY          RUNES（Dune，需配合下方 query id）
+#   DUNE_RUNES_QUERY_ID   Dune 查询 ID
+#   COINGLASS_API_KEY     爆仓/强平（CoinGlass）
+# 不填则对应数据优雅降级为「未知」，不影响其余真实数据。
+# ---------------------------------------------------------------------------
+name: Night Researcher · 每日重跑 + 部署
+
+on:
+  schedule:
+    - cron: "0 16 * * *"          # UTC 16:00 ≈ 北京时间次日 00:00
+  workflow_dispatch: {}           # 允许在 Actions 页手动 "Run workflow" 立即触发
+
+permissions:
+  contents: write                 # 推送 research.json 所需
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run research (纯标准库，无需 pip install)
+        env:
+          UNISAT_API_KEY: ${{ secrets.UNISAT_API_KEY }}
+          DUNE_API_KEY: ${{ secrets.DUNE_API_KEY }}
+          DUNE_RUNES_QUERY_ID: ${{ secrets.DUNE_RUNES_QUERY_ID }}
+          COINGLASS_API_KEY: ${{ secrets.COINGLASS_API_KEY }}
+        run: python run_research.py
+
+      - name: Commit & push research.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dashboard/data/research.json
+          if git diff --staged --quiet; then
+            echo "research.json 无变化，跳过提交"
+          else
+            git commit -m "chore: 自动重跑研究结论 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git push
+          fi
