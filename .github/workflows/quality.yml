@@ -8,7 +8,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,5 +26,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Paper trading engine tests
+      - name: Install browser test dependencies
+        run: npm install --no-audit --no-fund
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Paper trading and AI proxy tests
         run: npm test
+      - name: Browser end-to-end tests
+        run: npm run test:e2e
