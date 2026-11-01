@@ -4,8 +4,7 @@ on:
   push:
     branches: ["main", "feat/**"]
 permissions:
-  contents: read
-  issues: write
+  contents: write
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -35,42 +34,19 @@ jobs:
         run: npm test
       - name: Browser end-to-end tests
         run: npm run test:e2e
-      - name: Publish browser test diagnostics to PR
+      - name: Publish browser test diagnostics to a temporary branch
         if: failure() && github.event_name == 'pull_request'
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DIAG_BRANCH: diagnostics/e2e-${{ github.run_id }}
         run: |
-          python - <<'PY'
-          import json, os, subprocess
-          path = "test-results/report.json"
-          failures = []
-          if os.path.exists(path):
-              report = json.load(open(path, encoding="utf-8"))
-              def walk(suites):
-                  for suite in suites or []:
-                      for spec in suite.get("specs", []):
-                          for case in spec.get("tests", []):
-                              for result in case.get("results", []):
-                                  if result.get("status") != "passed":
-                                      error = result.get("error") or {}
-                                      failures.append((spec.get("title", "untitled"), result.get("status"), error.get("message") or error.get("stack") or "No error detail"))
-                      walk(suite.get("suites", []))
-              walk(report.get("suites", []))
-          else:
-              failures.append(("report", "missing", "Playwright JSON report was not generated"))
-          lines = [
-              "### Night Researcher Playwright E2E diagnostics",
-              "Run: " + os.environ.get("GITHUB_SERVER_URL", "https://github.com") + "/" + os.environ["GITHUB_REPOSITORY"] + "/actions/runs/" + os.environ["GITHUB_RUN_ID"],
-              "Failed/unfinished tests: " + str(len(failures))
-          ]
-          for index, (title, status, error) in enumerate(failures, 1):
-              lines.extend(["", f"{index}. **{title}** ({status})", "", "~~~text", str(error)[:2500], "~~~"])
-          body = "\\n".join(lines)
-          subprocess.run([
-              "gh", "api", "--method", "POST",
-              f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments",
-              "-f", "body=" + body
-          ], check=True)
-          PY
+          if [ -f test-results/report.json ]; then
+            REPORT="$(base64 -w0 test-results/report.json)"
+          else
+            REPORT="$(printf '%s' '{"error":"Playwright report was not generated"}' | base64 -w0)"
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f "ref=refs/heads/$DIAG_BRANCH" -f "sha=$GITHUB_SHA"
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/.diagnostics/e2e-report.json" \
+            -f "message=ci: capture Playwright diagnostics [skip ci]" \
+            -f "content=$REPORT" -f "branch=$DIAG_BRANCH"
