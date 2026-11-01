@@ -131,3 +131,25 @@ test("Qwen proxy rejects unsupported workspace regions", async () => {
   }), async () => okResponse());
   assert.equal(response.status, 400);
 });
+
+
+test("MiniMax request uses completion-token controls and does not surface hidden reasoning", async () => {
+  const { handleAiChat } = await corePromise;
+  let payload;
+  const response = await handleAiChat(makeRequest({
+    provider: "minimax", model: "MiniMax-M3", region: "china", apiKey: "mm-test-key-123456",
+    messages: [{ role: "user", content: "给出最终结论" }]
+  }), async (_url, init) => {
+    payload = JSON.parse(init.body);
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: "<think>private reasoning</think>最终结论" } }],
+      usage: { total_tokens: 9 }
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  });
+  const data = await response.json();
+  assert.equal(payload.max_completion_tokens, 1200);
+  assert.equal(payload.reasoning_split, true);
+  assert.deepEqual(payload.thinking, { type: "adaptive" });
+  assert.equal(data.text, "最终结论");
+  assert.doesNotMatch(data.text, /private reasoning|<think>/);
+});
