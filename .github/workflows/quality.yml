@@ -34,3 +34,21 @@ jobs:
         run: npm test
       - name: Browser end-to-end tests
         run: npm run test:e2e
+      - name: Cloudflare Pages Preview smoke test
+        if: github.event_name == 'pull_request'
+        run: |
+          PREVIEW_URL="https://feat-paper-trading-command-c.night-researcher-dash.pages.dev"
+          for attempt in $(seq 1 18); do
+            html_code="$(curl -sS -o /tmp/nr-preview.html -w '%{http_code}' "$PREVIEW_URL/trading.html" || true)"
+            api_code="$(curl -sS -o /tmp/nr-ai-smoke.json -w '%{http_code}' -X POST "$PREVIEW_URL/api/ai/chat" -H 'Content-Type: application/json' --data '{"provider":"invalid"}' || true)"
+            if [ "$html_code" = "200" ] && grep -q "Qwen3.7-Plus" /tmp/nr-preview.html && [ "$api_code" = "400" ] && grep -q "不支持的 AI 服务商" /tmp/nr-ai-smoke.json; then
+              echo "Cloudflare Preview HTML and Pages Function are live."
+              cat /tmp/nr-ai-smoke.json
+              exit 0
+            fi
+            echo "Preview not ready yet (attempt $attempt): html=$html_code api=$api_code"
+            sleep 5
+          done
+          echo "Cloudflare Pages Preview did not expose the current trading page and AI function."
+          cat /tmp/nr-ai-smoke.json || true
+          exit 1
