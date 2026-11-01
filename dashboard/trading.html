@@ -175,6 +175,11 @@
             <button id="aiTest" class="ghost-btn">测试 API 连接</button>
             <button id="aiClearKey" class="ghost-btn">清空当前密钥</button>
           </div>
+          <div class="ai-actions">
+            <button id="paperSelfTestBtn" class="ghost-btn">运行当前盘口模拟自检</button>
+            <span id="paperSelfTestStatus" class="small-pill ai-status">未运行</span>
+          </div>
+          <div id="paperSelfTestResult" class="ai-selftest-result">使用当前真实公开盘口，在独立临时账户中完成一笔小额买入/卖出往返；不影响主模拟账户，不写入本地存储。</div>
           <label class="field-label" for="aiPrompt">研究任务</label>
           <textarea id="aiPrompt" class="field-control ai-prompt" rows="4">分析当前市场结构和模拟账户。提出 2–3 个可证伪的策略假设，列出入场触发、退出/失效条件、交易成本、风险预算和需要补充的数据。不要给出真实下单指令。</textarea>
           <div class="ai-actions">
