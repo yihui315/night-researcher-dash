@@ -37,3 +37,6 @@
 .ai-status.error{color:#ef7777}
 .ai-status.pending{color:#e8bf6a}
 @media(max-width:900px){.ai-actions .submit-order{min-width:100%}}
+
+
+.ai-selftest-result{white-space:pre-line;line-height:1.7;color:var(--muted);font-size:12px;padding:10px;border:1px dashed var(--line);border-radius:9px;background:rgba(5,10,18,.32);overflow-wrap:anywhere}
