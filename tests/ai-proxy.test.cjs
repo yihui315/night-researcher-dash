@@ -26,7 +26,7 @@ test("MiniMax M3 routes to official OpenAI-compatible endpoint", async () => {
   let calledUrl = "";
   let calledInit;
   const response = await handleAiChat(makeRequest({
-    provider: "minimax", model: "MiniMax-M3", apiKey: "mm-test-key-123456",
+    provider: "minimax", model: "MiniMax-M3", region: "china", apiKey: "mm-test-key-123456",
     messages: [{ role: "user", content: "只回复 AI_READY" }]
   }), async (url, init) => {
     calledUrl = url;
@@ -35,7 +35,7 @@ test("MiniMax M3 routes to official OpenAI-compatible endpoint", async () => {
   });
   const data = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(calledUrl, "https://api.minimax.io/v1/chat/completions");
+  assert.equal(calledUrl, "https://api.minimaxi.com/v1/chat/completions");
   assert.equal(calledInit.headers.authorization, "Bearer mm-test-key-123456");
   assert.equal(JSON.parse(calledInit.body).model, "MiniMax-M3");
   assert.equal(data.text, "AI_READY");
@@ -46,7 +46,7 @@ test("Qwen Coder uses workspace and selected region", async () => {
   const { handleAiChat } = await corePromise;
   let calledUrl = "";
   const response = await handleAiChat(makeRequest({
-    provider: "qwen", model: "qwen3-coder-plus", apiKey: "sk-general-test-123456",
+    provider: "qwen", model: "qwen3.7-plus", apiKey: "sk-general-test-123456",
     region: "singapore", workspaceId: "ws-night-researcher",
     messages: [{ role: "user", content: "检查模拟交易风险闸门" }]
   }), async url => {
@@ -97,4 +97,26 @@ test("AI proxy rejects non-POST requests", async () => {
   const { handleAiChat } = await corePromise;
   const response = await handleAiChat(makeRequest({}, { method: "GET" }));
   assert.equal(response.status, 405);
+});
+
+
+test("MiniMax global key uses the global endpoint", async () => {
+  const { handleAiChat } = await corePromise;
+  let calledUrl = "";
+  const response = await handleAiChat(makeRequest({
+    provider: "minimax", model: "MiniMax-M3", region: "global", apiKey: "mm-global-test-key-123456",
+    messages: [{ role: "user", content: "只回复 AI_READY" }]
+  }), async url => { calledUrl = url; return okResponse(); });
+  assert.equal(response.status, 200);
+  assert.equal(calledUrl, "https://api.minimax.io/v1/chat/completions");
+});
+
+test("Qwen proxy rejects models outside the current Model Studio allowlist", async () => {
+  const { handleAiChat } = await corePromise;
+  const response = await handleAiChat(makeRequest({
+    provider: "qwen", model: "qwen3-coder-plus", apiKey: "sk-general-test-123456",
+    region: "singapore", workspaceId: "ws-test",
+    messages: [{ role: "user", content: "hello" }]
+  }), async () => okResponse());
+  assert.equal(response.status, 400);
 });
