@@ -141,9 +141,14 @@
             <option value="qwen">Qwen3-Coder-Plus · Model Studio</option>
           </select>
           <div id="minimaxFields" class="ai-config">
+            <label class="field-label" for="minimaxRegion">MiniMax API 区域（必须与 Key 所属站点一致）</label>
+            <select id="minimaxRegion" class="field-control">
+              <option value="china" selected>中国站 · api.minimaxi.com</option>
+              <option value="global">国际站 · api.minimax.io</option>
+            </select>
             <label class="field-label" for="minimaxApiKey">MiniMax API Key</label>
             <input id="minimaxApiKey" class="field-control" type="password" autocomplete="off" spellcheck="false" placeholder="输入 MiniMax API Key">
-            <small class="ai-note">OpenAI 兼容接口：api.minimax.io/v1 · 模型 MiniMax-M3</small>
+            <small class="ai-note">OpenAI 兼容接口；支持 MiniMax-M3。中国站与国际站的 API Key 和域名必须匹配。</small>
           </div>
           <div id="qwenFields" class="ai-config hidden">
             <label class="field-label" for="qwenRegion">Model Studio 区域</label>
@@ -152,7 +157,14 @@
               <option value="beijing">中国（北京）</option>
               <option value="hongkong">中国香港</option>
               <option value="tokyo">日本东京</option>
+              <option value="frankfurt">德国法兰克福</option>
               <option value="virginia">美国弗吉尼亚</option>
+            </select>
+            <label class="field-label" for="qwenModel">Qwen 模型</label>
+            <select id="qwenModel" class="field-control">
+              <option value="qwen3.7-plus" selected>Qwen3.7-Plus · 编程/研究</option>
+              <option value="qwen3.8-max">Qwen3.8-Max · 高阶推理</option>
+              <option value="qwen3.6-plus">Qwen3.6-Plus · 编程/多模态</option>
             </select>
             <label class="field-label" for="qwenWorkspaceId">Workspace ID</label>
             <input id="qwenWorkspaceId" class="field-control" type="text" autocomplete="off" spellcheck="false" placeholder="填写百炼工作空间 ID">
