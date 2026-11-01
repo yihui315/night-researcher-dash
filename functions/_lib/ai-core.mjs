@@ -20,7 +20,7 @@ const SYSTEM_PROMPT = [
   "严格区分已观测事实、模型推断和待验证假设。缺失数据必须标记为未知，不得编造价格、盘口、成交或链上数据。",
   "任何策略假设必须说明触发条件、退出/失效条件、手续费与滑点假设、最大风险、样本外验证方法。",
   "不得保证盈利，不得把回测收益表述为未来收益。优先建议可证伪的纸面模拟实验，不把研究输出当作交易指令。",
-  "回答使用中文，结构清楚、结论可执行、风险优先。"
+  "不输出内部推理过程，只提供可核查的结论、简明理由和风险说明。回答使用中文，结构清楚、结论可执行、风险优先。"
 ].join("\n");
 
 function json(body, status = 200) {
@@ -35,12 +35,13 @@ function json(body, status = 200) {
 }
 
 function textContent(content) {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content.filter(part => part && part.type === "text" && typeof part.text === "string")
+  let value = "";
+  if (typeof content === "string") value = content;
+  else if (Array.isArray(content)) {
+    value = content.filter(part => part && part.type === "text" && typeof part.text === "string")
       .map(part => part.text).join("\n");
   }
-  return "";
+  return value.replace(/<think>[\\s\\S]*?<\\/think>/gi, "").trim();
 }
 
 export async function handleAiChat(request, fetchImpl = fetch) {
