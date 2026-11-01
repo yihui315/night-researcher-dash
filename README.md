@@ -178,7 +178,7 @@ class MyStrategy:
 
 ## 13. AI 研究副驾驶与浏览器联调
 
-- `dashboard/trading.html` 新增 MiniMax M3 / Qwen3-Coder-Plus API 输入界面、连接测试和研究分析窗口。
+- `dashboard/trading.html` 新增 MiniMax M3 / Qwen Model Studio API 输入界面、连接测试和研究分析窗口；另有“当前盘口模拟自检”，使用公开盘口在临时账户中做买卖往返。
 - `functions/api/ai/chat.js` 是 Cloudflare Pages 同站 API；`functions/_lib/ai-core.mjs` 负责校验和转发。
 - API Key 仅在当前页面内存中保留，按用户点击发起请求时经 HTTPS 发送到同站函数，再转发至所选模型服务商；应用不写入 localStorage、Cookie、Git 或日志。刷新页面后需要重新输入。
 - MiniMax：模型 `MiniMax-M3`；中国站 `https://api.minimaxi.com/v1`、国际站 `https://api.minimax.io/v1`，API Key 与区域必须匹配。
