@@ -126,8 +126,10 @@ export async function handleAiChat(request, fetchImpl = fetch) {
         model,
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
         temperature: 0.2,
-        max_tokens: 1200,
-        stream: false
+        stream: false,
+        ...(provider === "minimax"
+          ? { max_completion_tokens: 1200, thinking: { type: "adaptive" }, reasoning_split: true }
+          : { max_tokens: 1200 })
       }),
       signal: AbortSignal.timeout(45000)
     });
