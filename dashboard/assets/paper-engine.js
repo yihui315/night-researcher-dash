@@ -5,7 +5,8 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
   const STORAGE_KEY = "night-researcher.paper.v1";
-  const ALLOWED_SYMBOLS = new Set(["BTCUSDT", "ETHUSDT", "ORDIUSDT", "1000SATSUSDT"]);\n  const CFG = { initialCash: 10000, feeRate: 0.001, minNotional: 5, maxOrderPct: 0.10, maxExposurePct: 0.40, dailyLossPct: 0.03, maxDrawdownPct: 0.10 };
+  const ALLOWED_SYMBOLS = new Set(["BTCUSDT", "ETHUSDT", "ORDIUSDT", "1000SATSUSDT"]);
+  const CFG = { initialCash: 10000, feeRate: 0.001, minNotional: 5, maxOrderPct: 0.10, maxExposurePct: 0.40, dailyLossPct: 0.03, maxDrawdownPct: 0.10 };
   const round = (n, d) => Number(Number(n).toFixed(d == null ? 10 : d));
   const today = () => new Date().toISOString().slice(0, 10);
   function createAccount(initialCash) {
