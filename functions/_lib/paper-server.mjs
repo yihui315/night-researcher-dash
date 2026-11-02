@@ -1,11 +1,14 @@
 import { json, isSameOrigin, requireConfig, readSession } from "./paper-ledger.mjs";
+import {
+  D, U, add, sub, mul, div, cmp, gt, gte, lt, lte, isPos, isZero, neg, abs, max, toNumber
+} from "./decimal.mjs";
 
 const API_BASE = "https://data-api.binance.vision/api/v3";
 const ALLOWED_SYMBOLS = new Set(["BTCUSDT", "ETHUSDT", "ORDIUSDT", "1000SATSUSDT"]);
 const CFG = Object.freeze({
-  initialCash: 10000,
-  feeRate: 0.001,
-  minNotional: 5,
+  initialCash: "10000",            // 定点字符串，D() 解析为 1e8 缩放
+  feeRate: "0.001",
+  minNotional: "5",
   maxOrderPct: 0.10,
   maxExposurePct: 0.40,
   dailyLossPct: 0.03,
@@ -14,29 +17,28 @@ const CFG = Object.freeze({
   maxBodyBytes: 16000
 });
 const OPEN_STATUSES = new Set(["OPEN", "PARTIALLY_FILLED"]);
-const EPS = 1e-10;
 
 function nowIso() { return new Date().toISOString(); }
 function utcDay() { return new Date().toISOString().slice(0, 10); }
 function finite(value) { return Number.isFinite(Number(value)); }
-function round(value) { return Number(Number(value).toFixed(12)); }
 
 function createAccount() {
   const now = nowIso();
+  const cash = D(CFG.initialCash);
   return {
     version: 1,
     generation: 1,
-    initialCash: CFG.initialCash,
-    cash: CFG.initialCash,
-    reservedCash: 0,
+    initialCash: U(cash),
+    cash: U(cash),
+    reservedCash: U(0n),
     positions: {},
     orders: [],
     trades: [],
     lastBookSequence: {},
-    realizedPnl: 0,
-    equityPeak: CFG.initialCash,
+    realizedPnl: U(0n),
+    equityPeak: U(cash),
     dayKey: utcDay(),
-    dayStartEquity: CFG.initialCash,
+    dayStartEquity: U(cash),
     createdAt: now,
     updatedAt: now
   };
@@ -131,55 +133,59 @@ function accountFromRow(row) {
   return { account, version: Number(row.version), stateHash: row.state_hash };
 }
 
-async function findOrderByClientId(db, sessionId, clientOrderId) {
+function findOrderByClientId(db, sessionId, clientOrderId) {
   return db.prepare(
     "SELECT order_id, client_order_id, request_hash, status, rejection_code, rejection_reason FROM paper_orders WHERE session_id = ? AND client_order_id = ?"
   ).bind(sessionId, clientOrderId).first();
 }
 
+// 金额字段（字符串->Number）对外暴露，保持与原客户端契约一致且精确（< 2^53 无损）
+function num(b) { return toNumber(b); }
+
 function accountEquity(account, marks) {
-  let equity = Number(account.cash || 0);
+  let equity = D(account.cash || 0);
   for (const [symbol, position] of Object.entries(account.positions || {})) {
-    const mark = Number(marks[symbol]);
-    if (!(mark > 0)) throw new Error("缺少持仓标的的最新服务端标记价格：" + symbol);
-    equity += Number(position.qty || 0) * mark;
+    const mark = D(marks[symbol]);
+    if (!(mark > 0n)) throw new Error("缺少持仓标的的最新服务端标记价格：" + symbol);
+    equity = add(equity, mul(D(position.qty || 0), mark));
   }
   return equity;
 }
 
 function summarize(account, marks) {
   const equity = accountEquity(account, marks);
-  let marketValue = 0;
-  let unrealizedPnl = 0;
+  let marketValue = 0n;
+  let unrealizedPnl = 0n;
   const positions = [];
   for (const [symbol, p] of Object.entries(account.positions || {})) {
-    const mark = Number(marks[symbol]);
-    const value = Number(p.qty) * mark;
-    const pnl = value - Number(p.qty) * Number(p.avgPrice);
-    marketValue += value;
-    unrealizedPnl += pnl;
+    const mark = D(marks[symbol]);
+    const value = mul(D(p.qty), mark);
+    const pnl = sub(value, mul(D(p.qty), D(p.avgPrice)));
+    marketValue = add(marketValue, value);
+    unrealizedPnl = add(unrealizedPnl, pnl);
     positions.push({
-      symbol, qty: Number(p.qty), avgPrice: Number(p.avgPrice), mark,
-      marketValue: value, unrealizedPnl: pnl, reservedQty: Number(p.reservedQty || 0)
+      symbol, qty: num(p.qty), avgPrice: num(p.avgPrice), mark: num(mark),
+      marketValue: num(value), unrealizedPnl: num(pnl), reservedQty: num(p.reservedQty || 0)
     });
   }
-  const drawdown = account.equityPeak > 0 ? Math.max(0, (account.equityPeak - equity) / account.equityPeak) : 0;
-  const dailyPnl = equity - Number(account.dayStartEquity || account.initialCash);
+  const drawdown = equity > 0n ? (equity < D(account.equityPeak) ? div(sub(D(account.equityPeak), equity), D(account.equityPeak)) : 0n) : 0n;
+  const dayStartEquity = D(account.dayStartEquity || account.initialCash);
+  const dailyPnl = sub(equity, dayStartEquity);
   return {
-    equity,
-    cash: Number(account.cash),
-    availableCash: Number(account.cash) - Number(account.reservedCash || 0),
-    reservedCash: Number(account.reservedCash || 0),
-    marketValue,
-    unrealizedPnl,
-    realizedPnl: Number(account.realizedPnl || 0),
-    totalPnl: equity - Number(account.initialCash),
-    dailyPnl,
-    drawdown,
-    exposurePct: equity > 0 ? marketValue / equity : 0,
+    equity: num(equity),
+    cash: num(account.cash),
+    availableCash: num(sub(D(account.cash), D(account.reservedCash || 0))),
+    reservedCash: num(account.reservedCash),
+    marketValue: num(marketValue),
+    unrealizedPnl: num(unrealizedPnl),
+    realizedPnl: num(account.realizedPnl || 0),
+    totalPnl: num(sub(equity, D(account.initialCash))),
+    dailyPnl: num(dailyPnl),
+    drawdown: num(drawdown),
+    exposurePct: equity > 0n ? num(div(marketValue, equity)) : 0,
     positions,
-    dailyLossLocked: dailyPnl <= -Number(account.dayStartEquity || account.initialCash) * CFG.dailyLossPct,
-    drawdownLocked: drawdown >= CFG.maxDrawdownPct
+    dailyLossLocked: lte(dailyPnl, neg(mul(dayStartEquity, D(CFG.dailyLossPct)))),
+    drawdownLocked: gte(drawdown, D(CFG.maxDrawdownPct))
   };
 }
 
@@ -188,9 +194,9 @@ function updateRiskMarks(account, marks) {
   const day = utcDay();
   if (account.dayKey !== day) {
     account.dayKey = day;
-    account.dayStartEquity = equity;
+    account.dayStartEquity = U(equity);
   }
-  account.equityPeak = Math.max(Number(account.equityPeak || account.initialCash), equity);
+  account.equityPeak = U(max(D(account.equityPeak || account.initialCash), equity));
   return summarize(account, marks);
 }
 
@@ -205,7 +211,7 @@ function normalizeLevels(raw, descending) {
   const levels = raw.slice(0, 1000).map(level => {
     const price = Number(level && level[0]);
     const qty = Number(level && level[1]);
-    if (!(price > 0) || !(qty > 0) || !Number.isFinite(price) || !Number.isFinite(qty)) throw new Error("MARKET_BOOK_INVALID_LEVEL");
+    if (!(price > 0) || !(qty > 0)) throw new Error("MARKET_BOOK_INVALID_LEVEL");
     return [price, qty];
   });
   for (let i = 1; i < levels.length; i++) {
@@ -220,7 +226,7 @@ function parseFilters(info, symbol) {
   const lot = row.filters.find(item => item.filterType === "LOT_SIZE");
   const price = row.filters.find(item => item.filterType === "PRICE_FILTER");
   const notional = row.filters.find(item => item.filterType === "NOTIONAL" || item.filterType === "MIN_NOTIONAL");
-  if (!lot || !price || !(Number(lot.stepSize) > 0) || !(Number(price.tickSize) > 0)) throw new Error("EXCHANGE_FILTERS_INCOMPLETE");
+  if (!lot || !price || !(D(lot.stepSize) > 0n) || !(D(price.tickSize) > 0n)) throw new Error("EXCHANGE_FILTERS_INCOMPLETE");
   return {
     minQty: Number(lot.minQty),
     maxQty: Number(lot.maxQty),
@@ -228,7 +234,7 @@ function parseFilters(info, symbol) {
     minPrice: Number(price.minPrice),
     maxPrice: Number(price.maxPrice),
     tickSize: Number(price.tickSize),
-    minNotional: Math.max(CFG.minNotional, Number(notional && (notional.minNotional || notional.notional) || 0))
+    minNotional: Math.max(Number(CFG.minNotional), Number(notional && (notional.minNotional || notional.notional) || 0))
   };
 }
 
@@ -268,100 +274,106 @@ async function fetchMarketContext(symbol, env, needFilters = true) {
 }
 
 function stepValid(value, step) {
-  if (!(step > 0)) return false;
-  const ratio = Number(value) / Number(step);
-  return Number.isFinite(ratio) && Math.abs(ratio - Math.round(ratio)) <= 1e-7;
+  const s = Number(step);
+  if (!(s > 0)) return false;
+  const r = Number(value);
+  if (!(r >= 0)) return false;
+  const ratio = r / s;
+  return Math.abs(ratio - Math.round(ratio)) < 1e-9;
 }
 
 function walkBook(levels, quantity) {
   let remaining = Number(quantity);
   let filledQty = 0;
-  let notional = 0;
+  let notional = 0n;
   const fills = [];
   for (const [price, available] of levels || []) {
-    if (!(remaining > EPS)) break;
-    const take = Math.min(remaining, Number(available));
+    if (!(remaining > 0)) break;
+    const take = remaining < available ? remaining : available;
     if (!(take > 0)) continue;
-    const fillNotional = take * Number(price);
-    fills.push({ qty: round(take), price: Number(price), notional: fillNotional });
-    filledQty += take;
-    notional += fillNotional;
-    remaining -= take;
+    const fillNotional = mul(take, price);
+    fills.push({ qty: take, price, notional: fillNotional });
+    filledQty = filledQty + take;
+    notional = add(notional, fillNotional);
+    remaining = remaining - take;
   }
   return {
     fills,
-    filledQty: round(filledQty),
-    remainingQty: round(Math.max(0, remaining)),
-    notional: round(notional),
-    avgPrice: filledQty > 0 ? notional / filledQty : null
+    filledQty,
+    remainingQty: remaining < 0 ? 0 : remaining,
+    notional,
+    avgPrice: filledQty > 0 ? num(div(notional, D(filledQty))) : null
   };
 }
 
 function eligibleLevels(side, type, limitPrice, book) {
   const levels = side === "BUY" ? book.asks : book.bids;
   if (type !== "LIMIT") return levels;
-  return levels.filter(([price]) => side === "BUY" ? price <= limitPrice + EPS : price >= limitPrice - EPS);
+  const lp = Number(limitPrice);
+  return levels.filter(([price]) => side === "BUY" ? price <= lp : price >= lp);
 }
 
 function reservedBuyExposure(account, exceptOrderId) {
   return (account.orders || []).filter(order =>
     OPEN_STATUSES.has(order.status) && order.side === "BUY" && order.id !== exceptOrderId
-  ).reduce((sum, order) => sum + Number(order.remainingQty || 0) * Number(order.limitPrice || 0), 0);
+  ).reduce((sum, order) => add(sum, mul(D(order.remainingQty || 0), D(order.limitPrice || 0))), 0n);
 }
 
 function releaseReservation(account, order, quantity) {
-  const remainingBefore = Number(order.remainingQty || 0);
-  const releaseQty = Math.min(remainingBefore, Number(quantity));
-  if (order.side === "BUY" && order.reservedCash > 0 && remainingBefore > 0) {
-    const release = order.reservedCash * (releaseQty / remainingBefore);
-    account.reservedCash = Math.max(0, account.reservedCash - release);
-    order.reservedCash = Math.max(0, order.reservedCash - release);
+  const remainingBefore = D(order.remainingQty || 0);
+  const releaseQty = remainingBefore < D(quantity) ? remainingBefore : D(quantity);
+  if (order.side === "BUY" && D(order.reservedCash) > 0n && remainingBefore > 0n) {
+    const release = mul(D(order.reservedCash), div(releaseQty, remainingBefore));
+    account.reservedCash = U(sub(D(account.reservedCash), release));
+    order.reservedCash = U(sub(D(order.reservedCash), release));
   }
-  if (order.side === "SELL" && order.reservedQty > 0) {
-    const release = Math.min(order.reservedQty, releaseQty);
+  if (order.side === "SELL" && D(order.reservedQty) > 0n) {
+    const release = releaseQty < D(order.reservedQty) ? releaseQty : D(order.reservedQty);
     const position = account.positions[order.symbol];
-    if (position) position.reservedQty = Math.max(0, Number(position.reservedQty || 0) - release);
-    order.reservedQty = Math.max(0, order.reservedQty - release);
+    if (position) position.reservedQty = U(sub(D(position.reservedQty || 0), release));
+    order.reservedQty = U(sub(D(order.reservedQty), release));
   }
 }
 
 function releaseAllReservation(account, order) {
-  releaseReservation(account, order, Number(order.remainingQty || 0));
+  releaseReservation(account, order, D(order.remainingQty || 0));
 }
 
 function applyFill(account, order, rawFill, fillIndex, book) {
-  const qty = Number(rawFill.qty);
-  const price = Number(rawFill.price);
-  const notional = qty * price;
-  const fee = notional * CFG.feeRate;
+  const qty = D(rawFill.qty);
+  const price = D(rawFill.price);
+  const notional = mul(qty, price);
+  const fee = mul(notional, D(CFG.feeRate));
   let realizedPnl = null;
 
   if (order.side === "BUY") {
-    const cost = notional + fee;
-    if (cost > Number(account.cash) - Number(account.reservedCash || 0) + 1e-8) throw new Error("INSUFFICIENT_CASH");
+    const cost = add(notional, fee);
+    const available = sub(D(account.cash), D(account.reservedCash || 0));
+    if (gt(cost, available)) throw new Error("INSUFFICIENT_CASH");
     let position = account.positions[order.symbol];
-    if (!position) position = account.positions[order.symbol] = { qty: 0, avgPrice: 0, reservedQty: 0 };
-    position.avgPrice = ((Number(position.qty) * Number(position.avgPrice)) + cost) / (Number(position.qty) + qty);
-    position.qty = round(Number(position.qty) + qty);
-    account.cash = round(Number(account.cash) - cost);
+    if (!position) position = account.positions[order.symbol] = { qty: "0", avgPrice: "0", reservedQty: "0" };
+    position.avgPrice = U(div(add(mul(D(position.qty), D(position.avgPrice)), cost), add(D(position.qty), qty)));
+    position.qty = U(add(D(position.qty), qty));
+    account.cash = U(sub(D(account.cash), cost));
   } else {
     const position = account.positions[order.symbol];
-    if (!position || qty > Number(position.qty) - Number(position.reservedQty || 0) + 1e-8) throw new Error("INSUFFICIENT_POSITION");
-    realizedPnl = notional - fee - Number(position.avgPrice) * qty;
-    position.qty = round(Number(position.qty) - qty);
-    account.cash = round(Number(account.cash) + notional - fee);
-    account.realizedPnl = round(Number(account.realizedPnl || 0) + realizedPnl);
-    if (position.qty <= EPS && Number(position.reservedQty || 0) <= EPS) delete account.positions[order.symbol];
+    const available = sub(D(position ? position.qty : 0n), D(position ? position.reservedQty || 0 : 0));
+    if (!position || gt(qty, available)) throw new Error("INSUFFICIENT_POSITION");
+    realizedPnl = sub(sub(notional, fee), mul(D(position.avgPrice), qty));
+    position.qty = U(sub(D(position.qty), qty));
+    account.cash = U(add(D(account.cash), sub(notional, fee)));
+    account.realizedPnl = U(add(D(account.realizedPnl || 0), realizedPnl));
+    if (D(position.qty) <= 0n && D(position.reservedQty || 0) <= 0n) delete account.positions[order.symbol];
   }
 
-  const priorFilled = Number(order.filledQty || 0);
-  order.filledQty = round(priorFilled + qty);
-  order.remainingQty = round(Math.max(0, Number(order.remainingQty) - qty));
-  order.fee = round(Number(order.fee || 0) + fee);
-  order.avgFillPrice = order.filledQty > 0
-    ? ((Number(order.avgFillPrice || 0) * priorFilled) + notional) / order.filledQty
+  const priorFilled = D(order.filledQty || 0);
+  order.filledQty = U(add(priorFilled, qty));
+  order.remainingQty = U(sub(D(order.remainingQty), qty) < 0n ? 0n : sub(D(order.remainingQty), qty));
+  order.fee = U(add(D(order.fee || 0), fee));
+  order.avgFillPrice = D(order.filledQty) > 0n
+    ? U(div(add(mul(D(order.avgFillPrice || 0), priorFilled), notional), D(order.filledQty)))
     : null;
-  if (realizedPnl != null) order.realizedPnl = round(Number(order.realizedPnl || 0) + realizedPnl);
+  if (realizedPnl != null) order.realizedPnl = U(add(D(order.realizedPnl || 0), realizedPnl));
 
   order.fillCount = Number(order.fillCount || 0) + 1;
   const stableFillIndex = order.fillCount;
@@ -372,11 +384,11 @@ function applyFill(account, order, rawFill, fillIndex, book) {
     timestamp: nowIso(),
     symbol: order.symbol,
     side: order.side,
-    qty: round(qty),
-    price,
-    notional: round(notional),
-    fee: round(fee),
-    realizedPnl: realizedPnl == null ? null : round(realizedPnl),
+    qty: U(qty),
+    price: U(price),
+    notional: U(notional),
+    fee: U(fee),
+    realizedPnl: realizedPnl == null ? null : U(realizedPnl),
     liquidityModel: "server-visible-orderbook-walk",
     bookSequence: book.sequence,
     bookReceivedAt: book.receivedAt
@@ -401,8 +413,8 @@ function validateInput(body) {
   if (!ALLOWED_SYMBOLS.has(symbol)) throw new Error("交易对白名单不允许该标的");
   if (side !== "BUY" && side !== "SELL") throw new Error("订单方向无效");
   if (type !== "MARKET" && type !== "LIMIT") throw new Error("订单类型无效");
-  if (!(quantity > 0) || !Number.isFinite(quantity)) throw new Error("订单数量必须为正数");
-  if (type === "LIMIT" && (!(limitPrice > 0) || !Number.isFinite(limitPrice))) throw new Error("限价单必须提供有效限价");
+  if (!isPos(quantity)) throw new Error("订单数量必须为正数");
+  if (type === "LIMIT" && !isPos(limitPrice)) throw new Error("限价单必须提供有效限价");
   if (type === "MARKET" && limitPrice != null) throw new Error("市价单不得提交限价字段");
   return { clientOrderId, confirmationId, symbol, side, type, quantity, limitPrice };
 }
@@ -410,33 +422,33 @@ function validateInput(body) {
 function validateAgainstMarket(account, input, context) {
   const { book, filters, marks } = context;
   if (Date.now() - Date.parse(book.receivedAt) > CFG.maxBookAgeMs) throw new Error("MARKET_BOOK_STALE");
-  if (!stepValid(input.quantity, filters.stepSize) || input.quantity < filters.minQty - EPS || input.quantity > filters.maxQty + EPS) {
+  if (!stepValid(input.quantity, filters.stepSize) || lt(input.quantity, filters.minQty) || gt(input.quantity, filters.maxQty)) {
     throw new Error("订单数量不符合交易所 LOT_SIZE 精度或范围");
   }
-  if (input.type === "LIMIT" && (!stepValid(input.limitPrice, filters.tickSize) || input.limitPrice < filters.minPrice - EPS || input.limitPrice > filters.maxPrice + EPS)) {
+  if (input.type === "LIMIT" && (!stepValid(input.limitPrice, filters.tickSize) || lt(input.limitPrice, filters.minPrice) || gt(input.limitPrice, filters.maxPrice))) {
     throw new Error("限价不符合交易所 PRICE_FILTER tickSize 或价格范围");
   }
   const best = input.side === "BUY" ? book.asks[0] : book.bids[0];
-  const reference = input.type === "LIMIT" ? input.limitPrice : Number(best && best[0]);
-  if (!(reference > 0)) throw new Error("服务端盘口没有有效报价");
-  const notional = input.quantity * reference;
-  if (notional < filters.minNotional - EPS) throw new Error("订单金额低于交易所最低名义金额");
+  const reference = input.type === "LIMIT" ? input.limitPrice : best[0];
+  if (!isPos(reference)) throw new Error("服务端盘口没有有效报价");
+  const notional = mul(input.quantity, reference);
+  if (lt(notional, filters.minNotional)) throw new Error("订单金额低于交易所最低名义金额");
   const snapshot = updateRiskMarks(account, marks);
   if (!(snapshot.equity > 0)) throw new Error("账户净值无效");
-  if (notional > snapshot.equity * CFG.maxOrderPct + EPS) throw new Error("超过单笔风险上限（账户净值的 10%）");
+  if (gt(notional, mul(snapshot.equity, D(CFG.maxOrderPct)))) throw new Error("超过单笔风险上限（账户净值的 10%）");
 
   if (input.side === "BUY") {
     if (snapshot.dailyLossLocked) throw new Error("触发单日亏损熔断，暂停新增买入");
     if (snapshot.drawdownLocked) throw new Error("触发账户回撤熔断，暂停新增买入");
-    if (snapshot.marketValue + reservedBuyExposure(account) + notional > snapshot.equity * CFG.maxExposurePct + EPS) {
+    if (gt(add(snapshot.marketValue, reservedBuyExposure(account)), add(notional, mul(snapshot.equity, D(CFG.maxExposurePct))))) {
       throw new Error("超过总持仓敞口上限（账户净值的 40%）");
     }
     const reservePrice = input.type === "LIMIT" ? input.limitPrice : reference;
-    if (reservePrice * input.quantity * (1 + CFG.feeRate) > snapshot.availableCash + EPS) throw new Error("可用 USDT 不足");
+    if (gt(mul(mul(reservePrice, input.quantity), add(1n, D(CFG.feeRate))), snapshot.availableCash)) throw new Error("可用 USDT 不足");
   } else {
     const position = account.positions[input.symbol];
-    const available = position ? Number(position.qty) - Number(position.reservedQty || 0) : 0;
-    if (input.quantity > available + EPS) throw new Error("现货模拟账户没有足够可卖持仓；不支持裸卖空");
+    const available = position ? sub(D(position.qty), D(position.reservedQty || 0)) : 0n;
+    if (gt(input.quantity, available)) throw new Error("现货模拟账户没有足够可卖持仓；不支持裸卖空");
   }
   return { reference, snapshot };
 }
@@ -450,16 +462,16 @@ function makeOrder(input, book) {
     symbol: input.symbol,
     side: input.side,
     type: input.type,
-    qty: input.quantity,
-    limitPrice: input.limitPrice,
+    qty: U(input.quantity),
+    limitPrice: input.limitPrice == null ? null : U(input.limitPrice),
     status: "NEW",
-    filledQty: 0,
-    remainingQty: input.quantity,
+    filledQty: "0",
+    remainingQty: U(input.quantity),
     avgFillPrice: null,
-    fee: 0,
+    fee: "0",
     realizedPnl: null,
-    reservedCash: 0,
-    reservedQty: 0,
+    reservedCash: "0",
+    reservedQty: "0",
     rejectionCode: null,
     reason: null,
     timeInForce: input.type === "MARKET" ? "IOC" : "GTC",
@@ -480,31 +492,34 @@ function simulateNewOrder(account, input, context) {
   const eligible = eligibleLevels(input.side, input.type, input.limitPrice || 0, book);
   const walk = walkBook(eligible, input.quantity);
 
-  if (input.type === "MARKET" && walk.filledQty <= EPS) throw new Error("可见盘口没有可成交深度");
-  if (input.type === "MARKET" && walk.remainingQty > EPS && walk.filledQty <= EPS) throw new Error("盘口深度不足，未产生模拟成交");
+  if (input.type === "MARKET" && !isPos(walk.filledQty)) throw new Error("可见盘口没有可成交深度");
+  if (input.type === "MARKET" && (!isPos(walk.filledQty) && isPos(walk.remainingQty))) throw new Error("盘口深度不足，未产生模拟成交");
 
   if (input.type === "MARKET") {
     const pre = summarize(account, context.marks);
-    if (input.side === "BUY" && (walk.notional > pre.equity * CFG.maxOrderPct + EPS ||
-      pre.marketValue + reservedBuyExposure(account) + walk.notional > pre.equity * CFG.maxExposurePct + EPS)) {
+    const preEquity = D(pre.equity);
+    const preMarketValue = D(pre.marketValue);
+    const preAvailable = D(pre.availableCash);
+    if (input.side === "BUY" && (gt(walk.notional, mul(preEquity, D(CFG.maxOrderPct))) ||
+      gt(add(preMarketValue, reservedBuyExposure(account)), add(walk.notional, mul(preEquity, D(CFG.maxExposurePct)))))) {
       throw new Error("盘口冲击使实际成交金额超过风险上限，未模拟成交");
     }
-    if (input.side === "BUY" && walk.notional * (1 + CFG.feeRate) > pre.availableCash + EPS) {
+    if (input.side === "BUY" && gt(mul(add(walk.notional, mul(walk.notional, D(CFG.feeRate))), 1n), preAvailable)) {
       throw new Error("盘口冲击导致可用 USDT 不足，未模拟成交");
     }
     if (input.side === "SELL") {
       const position = account.positions[input.symbol];
-      const available = position ? Number(position.qty) - Number(position.reservedQty || 0) : 0;
-      if (walk.filledQty > available + EPS) throw new Error("可卖持仓不足，未模拟成交");
+      const available = position ? sub(D(position.qty), D(position.reservedQty || 0)) : 0n;
+      if (gt(walk.filledQty, available)) throw new Error("可卖持仓不足，未模拟成交");
     }
   }
 
   for (const rawFill of walk.fills) fills.push(applyFill(account, order, rawFill, order.fillCount + 1, book));
 
   if (input.type === "MARKET") {
-    if (walk.remainingQty > EPS) {
-      order.cancelledQty = walk.remainingQty;
-      order.remainingQty = 0;
+    if (isPos(walk.remainingQty)) {
+      order.cancelledQty = U(walk.remainingQty);
+      order.remainingQty = "0";
       order.status = "PARTIALLY_FILLED";
       order.terminalAt = nowIso();
     } else {
@@ -512,20 +527,21 @@ function simulateNewOrder(account, input, context) {
       order.terminalAt = nowIso();
     }
   } else {
-    if (order.remainingQty > EPS) {
+    if (isPos(order.remainingQty)) {
       if (input.side === "BUY") {
-        const reserve = order.remainingQty * input.limitPrice * (1 + CFG.feeRate);
-        if (reserve > Number(account.cash) - Number(account.reservedCash || 0) + EPS) throw new Error("可用 USDT 不足，无法冻结剩余限价委托金额");
-        order.reservedCash = round(reserve);
-        account.reservedCash = round(Number(account.reservedCash || 0) + reserve);
+        const reserve = mul(mul(D(order.remainingQty), D(input.limitPrice)), add(1n, D(CFG.feeRate)));
+        const available = sub(D(account.cash), D(account.reservedCash || 0));
+        if (gt(reserve, available)) throw new Error("可用 USDT 不足，无法冻结剩余限价委托金额");
+        order.reservedCash = U(reserve);
+        account.reservedCash = U(add(D(account.reservedCash || 0), reserve));
       } else {
         const position = account.positions[input.symbol];
-        const available = position ? Number(position.qty) - Number(position.reservedQty || 0) : 0;
-        if (!position || order.remainingQty > available + EPS) throw new Error("剩余限价卖单超过可卖持仓");
-        order.reservedQty = order.remainingQty;
-        position.reservedQty = round(Number(position.reservedQty || 0) + order.remainingQty);
+        const available = position ? sub(D(position.qty), D(position.reservedQty || 0)) : 0n;
+        if (!position || gt(D(order.remainingQty), available)) throw new Error("剩余限价卖单超过可卖持仓");
+        order.reservedQty = U(order.remainingQty);
+        position.reservedQty = U(add(D(position.reservedQty || 0), D(order.remainingQty)));
       }
-      order.status = order.filledQty > EPS ? "PARTIALLY_FILLED" : "OPEN";
+      order.status = isPos(order.filledQty) ? "PARTIALLY_FILLED" : "OPEN";
     } else {
       order.status = "FILLED";
       order.terminalAt = nowIso();
@@ -543,7 +559,7 @@ function rejectionOrder(input, error) {
   order.status = "REJECTED";
   order.rejectionCode = String(error && error.message || "ORDER_REJECTED").slice(0, 80);
   order.reason = String(error && error.message || "订单被拒绝").slice(0, 300);
-  order.remainingQty = 0;
+  order.remainingQty = "0";
   order.terminalAt = nowIso();
   order.updatedAt = nowIso();
   return order;
@@ -552,17 +568,18 @@ function rejectionOrder(input, error) {
 function orderRow(order, sessionId, requestHash) {
   return [
     order.id, sessionId, order.clientOrderId, order.requestHash || requestHash, order.confirmationId,
-    order.symbol, order.side, order.type, order.qty, order.filledQty, order.remainingQty,
-    order.limitPrice, order.status, order.avgFillPrice, order.fee, order.realizedPnl,
-    order.reservedCash, order.reservedQty, order.rejectionCode, order.reason,
+    order.symbol, order.side, order.type, D(order.qty), D(order.filledQty), D(order.remainingQty),
+    order.limitPrice == null ? null : D(order.limitPrice), order.status, order.avgFillPrice == null ? null : D(order.avgFillPrice),
+    D(order.fee), order.realizedPnl == null ? null : D(order.realizedPnl),
+    D(order.reservedCash), D(order.reservedQty), order.rejectionCode, order.reason,
     order.bookSequence, order.bookReceivedAt, order.createdAt, order.updatedAt, order.terminalAt
   ];
 }
 
 function fillRow(fill, order, sessionId, index) {
   return [
-    fill.id, order.id, sessionId, index, fill.symbol, fill.side, fill.qty, fill.price,
-    fill.notional, fill.fee, fill.realizedPnl, fill.liquidityModel,
+    fill.id, order.id, sessionId, index, fill.symbol, fill.side, D(fill.qty), D(fill.price),
+    D(fill.notional), D(fill.fee), fill.realizedPnl == null ? null : D(fill.realizedPnl), fill.liquidityModel,
     fill.bookSequence, fill.bookReceivedAt, fill.timestamp
   ];
 }
@@ -637,6 +654,32 @@ function bookEvent(book) {
   };
 }
 
+// 对外账户对象：金额字段由字符串转换为精确 Number（< 2^53 无损），保持客户端契约
+function toPublicAccount(account) {
+  const clone = JSON.parse(JSON.stringify(account));
+  clone.cash = num(clone.cash);
+  clone.reservedCash = num(clone.reservedCash);
+  clone.realizedPnl = num(clone.realizedPnl);
+  clone.initialCash = num(clone.initialCash);
+  clone.dayStartEquity = num(clone.dayStartEquity);
+  clone.equityPeak = num(clone.equityPeak);
+  for (const [symbol, p] of Object.entries(clone.positions || {})) {
+    p.qty = num(p.qty); p.avgPrice = num(p.avgPrice); p.reservedQty = num(p.reservedQty || 0);
+  }
+  for (const order of (clone.orders || [])) {
+    order.qty = num(order.qty); order.limitPrice = order.limitPrice == null ? null : num(order.limitPrice);
+    order.filledQty = num(order.filledQty); order.remainingQty = num(order.remainingQty);
+    order.avgFillPrice = order.avgFillPrice == null ? null : num(order.avgFillPrice);
+    order.fee = num(order.fee); order.realizedPnl = order.realizedPnl == null ? null : num(order.realizedPnl);
+    order.reservedCash = num(order.reservedCash); order.reservedQty = num(order.reservedQty);
+  }
+  for (const t of (clone.trades || [])) {
+    t.qty = num(t.qty); t.price = num(t.price); t.notional = num(t.notional); t.fee = num(t.fee);
+    t.realizedPnl = t.realizedPnl == null ? null : num(t.realizedPnl);
+  }
+  return clone;
+}
+
 async function accountResponse(db, sessionId, env) {
   const row = await ensureAccount(db, sessionId);
   const { account, version, stateHash } = accountFromRow(row);
@@ -657,7 +700,7 @@ async function accountResponse(db, sessionId, env) {
   }
   let summary = null;
   try { summary = summarize(account, marks); } catch (_) { /* account remains readable when market marks are unavailable */ }
-  return { ok: true, mode: "server-authoritative-paper", account, marks, summary, markQuality, version, stateHash };
+  return { ok: true, mode: "server-authoritative-paper", account: toPublicAccount(account), marks, summary, markQuality, version, stateHash };
 }
 
 export async function handlePaperAccount(request, env) {
@@ -685,7 +728,7 @@ export async function handlePaperOrders(request, env) {
   const db = env.PAPER_DB;
   const requestHash = await sha256({
     symbol: input.symbol, side: input.side, type: input.type,
-    quantity: input.quantity, limitPrice: input.limitPrice
+    quantity: U(input.quantity), limitPrice: input.limitPrice == null ? null : U(input.limitPrice)
   });
   try {
     const duplicate = await findOrderByClientId(db, auth.sessionId, input.clientOrderId);
@@ -778,15 +821,15 @@ function processLimitOrders(account, symbol, book, marks) {
   const fills = [];
   const events = [];
   const orders = account.orders.filter(order =>
-    order.symbol === symbol && OPEN_STATUSES.has(order.status) && Number(order.remainingQty) > EPS
+    order.symbol === symbol && OPEN_STATUSES.has(order.status) && D(order.remainingQty) > 0n
   ).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
 
   for (const order of orders) {
     const snapshot = updateRiskMarks(account, marks);
     if (order.side === "BUY" && (snapshot.dailyLossLocked || snapshot.drawdownLocked)) {
       releaseAllReservation(account, order);
-      order.cancelledQty = Number(order.remainingQty);
-      order.remainingQty = 0;
+      order.cancelledQty = U(D(order.remainingQty));
+      order.remainingQty = "0";
       order.status = "REJECTED";
       order.rejectionCode = snapshot.dailyLossLocked ? "DAILY_LOSS_LIMIT" : "MAX_DRAWDOWN";
       order.reason = snapshot.dailyLossLocked ? "触发单日亏损熔断，限价买单拒绝成交" : "触发账户回撤熔断，限价买单拒绝成交";
@@ -799,13 +842,13 @@ function processLimitOrders(account, symbol, book, marks) {
 
     const eligible = eligibleLevels(order.side, "LIMIT", Number(order.limitPrice), book);
     const walk = walkBook(eligible, Number(order.remainingQty));
-    if (walk.filledQty <= EPS) continue;
+    if (!isPos(walk.filledQty)) continue;
 
-    const preExposure = snapshot.marketValue + reservedBuyExposure(account, order.id);
-    if (order.side === "BUY" && preExposure + walk.notional > snapshot.equity * CFG.maxExposurePct + EPS) {
+    const preExposure = add(snapshot.marketValue, reservedBuyExposure(account, order.id));
+    if (order.side === "BUY" && gt(add(preExposure, walk.notional), mul(snapshot.equity, D(CFG.maxExposurePct)))) {
       releaseAllReservation(account, order);
-      order.cancelledQty = Number(order.remainingQty);
-      order.remainingQty = 0;
+      order.cancelledQty = U(D(order.remainingQty));
+      order.remainingQty = "0";
       order.status = "REJECTED";
       order.rejectionCode = "MAX_EXPOSURE";
       order.reason = "账户敞口已变化，限价单拒绝成交";
@@ -816,7 +859,7 @@ function processLimitOrders(account, symbol, book, marks) {
       continue;
     }
 
-    const beforeRemaining = Number(order.remainingQty);
+    const beforeRemaining = D(order.remainingQty);
     releaseReservation(account, order, walk.filledQty);
     const orderFills = [];
     for (const rawFill of walk.fills) {
@@ -824,8 +867,8 @@ function processLimitOrders(account, symbol, book, marks) {
       fills.push({ fill, order, index: fill.fillIndex });
       orderFills.push(fill);
     }
-    if (order.remainingQty <= EPS) {
-      order.remainingQty = 0;
+    if (D(order.remainingQty) <= 0n) {
+      order.remainingQty = "0";
       order.status = "FILLED";
       order.terminalAt = nowIso();
       releaseAllReservation(account, order);
@@ -834,7 +877,7 @@ function processLimitOrders(account, symbol, book, marks) {
     }
     order.updatedAt = nowIso();
     updatedOrders.push(order);
-    events.push({ eventType: "paper.server.order.updated", payload: { order, fills: orderFills, previousRemainingQty: beforeRemaining, book: bookEvent(book) } });
+    events.push({ eventType: "paper.server.order.updated", payload: { order, fills: orderFills, previousRemainingQty: U(beforeRemaining), book: bookEvent(book) } });
     orderFills.forEach(fill => events.push({ eventType: "paper.server.order.filled", payload: { orderId: order.id, fill, bookSequence: book.sequence } }));
   }
   return { updatedOrders, fills, events };
@@ -856,11 +899,12 @@ export async function handlePaperMarketTick(request, env) {
     const row = await ensureAccount(db, auth.sessionId);
     const current = accountFromRow(row);
     const account = JSON.parse(JSON.stringify(current.account));
-    if (!account.orders.some(order => order.symbol === symbol && OPEN_STATUSES.has(order.status) && Number(order.remainingQty) > EPS)) {
-      return json({ ok: true, changed: false, reason: "NO_OPEN_ORDERS", account: account });
+    if (!account.orders.some(order => order.symbol === symbol && OPEN_STATUSES.has(order.status) && D(order.remainingQty) > 0n)) {
+      return json({ ok: true, changed: false, reason: "NO_OPEN_ORDERS", account: toPublicAccount(account) });
     }
     const context = await fetchMarketContext(symbol, env, false);
-    if (Number(account.lastBookSequence && account.lastBookSequence[symbol] || 0) >= context.book.sequence) {
+    const lastSeq = Number(account.lastBookSequence && account.lastBookSequence[symbol] || 0);
+    if (lastSeq >= context.book.sequence) {
       return json({ ok: true, changed: false, reason: "BOOK_SEQUENCE_ALREADY_PROCESSED" });
     }
     const result = processLimitOrders(account, symbol, context.book, context.marks);
@@ -900,13 +944,13 @@ export async function handlePaperOrderCancel(request, env, orderId) {
     const account = JSON.parse(JSON.stringify(current.account));
     const order = account.orders.find(item => item.id === orderId);
     if (!order) return json({ ok: false, code: "ORDER_NOT_FOUND", status: "NOT_FOUND" }, 404);
-    if (!OPEN_STATUSES.has(order.status) || !(Number(order.remainingQty) > EPS)) {
+    if (!OPEN_STATUSES.has(order.status) || !(D(order.remainingQty) > 0n)) {
       return json({ ...(await accountResponse(db, auth.sessionId, env)), status: "NOT_OPEN", order });
     }
     const before = { ...order };
     releaseAllReservation(account, order);
-    order.cancelledQty = Number(order.remainingQty);
-    order.remainingQty = 0;
+    order.cancelledQty = U(D(order.remainingQty));
+    order.remainingQty = "0";
     order.status = "CANCELED";
     order.terminalAt = nowIso();
     order.updatedAt = order.terminalAt;
@@ -1017,7 +1061,7 @@ export async function handlePaperReplay(request, env) {
       verified: verified && currentMatches,
       snapshots,
       lastSequence: (result.results || []).length ? result.results[result.results.length - 1].seq : 0,
-      account: replayed,
+      account: replayed ? toPublicAccount(replayed) : null,
       materializedVersion: materialized.version,
       replayedVersion: previousVersion,
       stateHash: previousHash,
