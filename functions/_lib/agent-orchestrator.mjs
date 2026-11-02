@@ -219,7 +219,7 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat, env
     region: body.region,
     workspaceId: body.workspaceId,
     thinkingMode: body.provider === "minimax" ? "disabled" : undefined,
-    maxTokens: 4096
+    maxTokens: 8192
   };
 
   const outputs = {};
@@ -268,6 +268,7 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat, env
         error: result.error || "AI 研究步骤失败",
         providerErrorCode: result.code || null,
         finishReason: result.finishReason || null,
+        diagnostics: result.diagnostics || null,
         partial: outputs,
         completedAt: new Date().toISOString()
       });
@@ -280,6 +281,7 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat, env
         error: result.error || "AI 研究步骤失败",
         providerErrorCode: result.code || null,
         finishReason: result.finishReason || null,
+        diagnostics: result.diagnostics || null,
         partial: outputs,
         autoExecution: false
       }, response.status || 502);
