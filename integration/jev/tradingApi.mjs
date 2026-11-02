@@ -55,6 +55,15 @@ export function createTradingApi(options = {}) {
 
   return {
     getProviderHealth: () => requestRoot("/api/health"),
+    listProviders: () => requestRoot("/api/v1/providers"),
+    probeProvider: providerId => {
+      if (!providerId) throw new TypeError("providerId is required");
+      return requestRoot("/api/v1/providers/" + encodeURIComponent(providerId) + "/probe", { method: "POST", body: "{}" });
+    },
+    listProviderModels: providerId => {
+      if (!providerId) throw new TypeError("providerId is required");
+      return requestRoot("/api/v1/providers/" + encodeURIComponent(providerId) + "/models");
+    },
     getHealth: () => request("/health"),
     getMarketSnapshot: (params = {}) => {
       const query = new URLSearchParams();
