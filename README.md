@@ -203,6 +203,7 @@ python -m unittest discover -s tests -p "test_*.py"
 - 架构审计：`docs/AI_QUANT_TRADING_OS_ARCHITECTURE.md`
 - JEV React 19 / Vite / Three.js 集成合同：`docs/JEV_TRADING_DESK_INTEGRATION.md`
 - 当前严格 Walk-forward：每个 90 天 fold 只用验证开始前的数据选择参数，再用独立策略实例验证；训练期无正 edge 时不强行选参。
+- 回测风险质量新增：胜率 95% Wilson 区间、Expectancy、Profit Factor、每笔 Sharpe/Sortino（不年化）、交易收益 bootstrap Monte Carlo（1,000 次）和额外每边 0/5/10/20/50 bps 滑点敏感性；Monte Carlo 不模拟盘口路径/序列相关，不能当作收益预测。
 - CRC20/LEAF：新增 `fetch_crc20_status`、`fetch_crc20_stats`、`fetch_crc20_history`、`fetch_crc20_market_snapshot`；marketplace sale 与 AXBT/LEAF pool swap 分开，不把它们合成一个虚假的 latest_trade。
 - CRC20 公开 API 没有可验证的完整订单簿，因此 best bid/ask、6h VWAP、统一 latest_trade 保持 unknown；需要和 `https://crc.garden/activity`、Bitcoin 区块/交易证据交叉核验。
 - 当前分支仍是 Night Researcher 预览原型；JEV 本地 React 前端、Provider Center DPAPI、4779 后端和六个 React 页面尚未真正集成。必须在可访问的 JEV 源码上完成，不宣称已完成。
