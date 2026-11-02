@@ -11,8 +11,8 @@ const MINIMAX_ENDPOINTS = Object.freeze({
   global: "https://api.minimax.io/v1/chat/completions"
 });
 const MINIMAX_MODEL = "MiniMax-M3";
-const QWEN_MODELS = Object.freeze(["qwen3.7-plus", "qwen3.8-max", "qwen3.6-plus"]);
-const DEFAULT_QWEN_MODEL = "qwen3.7-plus";
+const QWEN_MODELS = Object.freeze(["qwen3-coder-plus", "qwen3.7-plus", "qwen3.6-plus"]);
+const DEFAULT_QWEN_MODEL = "qwen3-coder-plus";
 
 const SYSTEM_PROMPT = [
   "你是 Night Researcher 的量化研究副驾驶。",
