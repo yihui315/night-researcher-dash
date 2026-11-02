@@ -72,14 +72,14 @@ CEX / DEX / Bitcoin L1 / BRC20 / RUNES / CRC20
 | 爆仓 | CoinGlass/Binance 连接器骨架 | API Key/端点与权限需复核 |
 | RUNES | UniSat/Dune 连接器骨架 | 当前没有可持续、已验证的代币级成交深度 |
 | Bitcoin L1 | mempool/网络手续费指标 | 只能作为网络活跃度代理，不能代表某个 Rune 价格 |
-| CRC20/LEAF | 尚未接入本仓库 | 需接 CRC20 API、crc.garden Activity，并做成交价/深度/链上交叉验证 |
+| CRC20/LEAF | 已接入 `crc20.org/api/v1/status`、`stats/LEAF`、`history`；分开读取 marketplace sale 与 AXBT/LEAF pool swap | best bid/ask、6h VWAP、统一 latest_trade 仍 unknown；需与 `crc.garden/activity` 和 Bitcoin 区块交叉核验 |
 | DEX | 尚未接入 | 未完成 |
 
 P1 数据接入顺序：
 1. Binance Spot depth diff + sequence 校验、交易所 exchangeInfo 过滤器。
 2. Binance/Bybit funding、OI、liquidations，数据缺失时显式 unknown。
 3. UniSat/Dune RUNES token-level trades/holders/market depth。
-4. CRC20/LEAF：latest confirmed trade、6h VWAP、best bid/ask（只有实时订单簿存在才显示）、holders/supply/events。
+4. CRC20/LEAF：基础 indexer/status/stats/history connector 已完成；继续验证 latest confirmed trade、6h VWAP、best bid/ask（只有真实订单簿存在才显示）、holders/supply/events。
 5. DEX pool reserves/swaps/LP 数据，按池子和区块时间保存。
 
 ### Layer 2 — 行情分析与信号引擎
@@ -129,6 +129,7 @@ P1 数据接入顺序：
 - 回测引擎已有事件驱动下一根 K 线开盘成交、OHLC 止损、交易成本、胜率、平均盈亏、Profit Factor、Expectancy、Payoff Ratio、Max Drawdown。
 - 已有 730 天窗口、90 天 OOS、参数网格和多个 vintage 的研究框架。
 - 本轮已将 `rolling_oos` 替换为严格 `walk_forward_oos`：每个 fold 只用验证开始前的数据选择参数，再用新策略实例在独立 90 天窗口从空仓验证；训练与验证上下文均按时间截断。
+- 新增 CRC20 LEAF 连接器：status、stats、history；marketplace sale 与 pool swap 分开；sat/LEAF → USD 仅作为 BTC/USDT 参考价派生值；best bid/ask 与 6h VWAP 未从不支持的 API 臆测。
 - Sharpe/Sortino、Monte Carlo、交易级滑点/冲击回放尚未完成；walk-forward 也需要真实数据运行后的结果审查。
 - 当前策略报告中的策略均未通过全部门禁，不允许晋级。
 
@@ -224,4 +225,4 @@ Live Trading：
 - 新增六角色研究 API；四个 LLM 角色串行输出结构化 JSON，KELLY/TAKER 由确定性代码运行。
 - 新增 Kelly Wilson 下界、1/4 Kelly、10% 上限；未通过样本/OOS 门禁时仓位为零。
 - TAKER 只能返回 proposal，不能调用 paper/live order。
-- 新增严格 Walk-forward 单元测试、六角色/Kelly/TAKER 测试和浏览器 E2E；真实 Provider Key 联调仍需用户在界面中输入并点击连接测试。
+- 新增严格 Walk-forward、CRC20 数值精度/索引同步、六角色/Kelly/TAKER 测试和浏览器 E2E；真实 Provider Key 联调仍需用户在界面中输入并点击连接测试。
