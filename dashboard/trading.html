@@ -20,6 +20,7 @@
     <div class="top-status">
       <span class="mode-pill"><i></i> PAPER ONLY · 模拟账户</span>
       <span id="connectionStatus" class="connection"><i></i> 正在连接行情</span>
+      <span id="paperLedgerStatus" class="small-pill ai-status" title="服务端快照备份状态">账本初始化中</span>
       <span id="lastUpdate" class="last-update">—</span>
       <a class="ghost-btn ai-nav-link" href="ai-settings.html">AI API 设置</a>
       <button id="exportTrades" class="ghost-btn">导出成交 CSV</button>
@@ -233,12 +234,13 @@
 
     <footer class="page-footer">
       <span>NIGHT RESEARCHER · PAPER TRADING V1</span>
-      <span>行情来源 Binance Public API · 账户数据仅保存在当前浏览器 localStorage</span>
+      <span>行情来源 Binance Public API · 本地缓存 + 可选 D1 服务端快照备份（非权威执行账本）</span>
       <a href="index.html">返回研究仪表盘</a>
     </footer>
   </main>
 
   <script src="assets/paper-engine.js"></script>
+  <script src="assets/paper-ledger-client.js"></script>
   <script src="assets/depth-sequencer.js"></script>
   <script src="assets/trading.js"></script>
   <script src="assets/ai-copilot.js"></script>
