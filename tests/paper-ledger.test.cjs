@@ -32,6 +32,14 @@ class FakeD1 {
           throw new Error("Unexpected first SQL: " + sql);
         },
         async all() {
+          if (sql.includes("AND event_type = ? ORDER BY seq DESC")) {
+            const [sid, eventType, limit] = args;
+            return { results: db.events.filter(e => e.session_id === sid && e.event_type === eventType).sort((a,b)=>b.seq-a.seq).slice(0,limit) };
+          }
+          if (sql.includes("WHERE session_id = ? ORDER BY seq DESC")) {
+            const [sid, limit] = args;
+            return { results: db.events.filter(e => e.session_id === sid).sort((a,b)=>b.seq-a.seq).slice(0,limit) };
+          }
           if (sql.includes("SELECT seq, event_id, event_type, payload_json, created_at FROM paper_events")) {
             const [sid, after, limit] = args;
             return { results: db.events.filter(e => e.session_id === sid && e.seq > after).sort((a,b)=>a.seq-b.seq).slice(0,limit) };
@@ -84,6 +92,23 @@ test("append-only ledger stores events, pages them, and is idempotent", async ()
   assert.equal(data.events.length, 1);
   assert.deepEqual(data.events[0].payload, { account: { cash: 9000 } });
   assert.equal(data.nextAfter, 1);
+});
+
+test("latest account snapshot query ignores newer unrelated agent events", async () => {
+  const e = env();
+  const session = await handlePaperSession(request("https://nr.example/api/paper/session", "POST"), e);
+  const cookie = cookieFrom(session);
+  await handlePaperLedger(request("https://nr.example/api/paper/ledger", "POST", cookie, {
+    eventId: "snapshot-event-0001", eventType: "paper.account.snapshot", payload: { account: { cash: 9000 } }
+  }), e);
+  await handlePaperLedger(request("https://nr.example/api/paper/ledger", "POST", cookie, {
+    eventId: "agent-event-00001", eventType: "agent.run.completed", payload: { runId: "run-1" }
+  }), e);
+  const response = await handlePaperLedger(request("https://nr.example/api/paper/ledger?latest=1&eventType=paper.account.snapshot&limit=1", "GET", cookie), e);
+  const data = await response.json();
+  assert.equal(data.events.length, 1);
+  assert.equal(data.events[0].eventType, "paper.account.snapshot");
+  assert.deepEqual(data.events[0].payload.account, { cash: 9000 });
 });
 
 test("rejects cross-origin writes, unsupported events, and oversized payloads", async () => {
