@@ -41,7 +41,7 @@
     if (!state.ledger) return;
     state.ledger.appendSnapshot(state.account, marks(), reason || "state-change")
       .then(result => {
-        if (result && result.ok) setLedgerStatus("服务端备份已同步", "ready");
+        if (result && result.ok) { setLedgerStatus("服务端备份已同步", "ready"); void refreshAudit(); }
         else setLedgerStatus("仅本地 · 服务端账本未配置", "warning");
       })
       .catch(() => setLedgerStatus("本地缓存 · 云端同步失败", "warning"));
@@ -78,6 +78,112 @@
       setLedgerStatus("本地缓存 · 云端同步失败", "warning");
     }
   }
+  async function refreshAudit() {
+    const container = $("auditEvents");
+    const empty = $("auditEmpty");
+    if (!container || !empty || !state.ledger) return;
+    container.replaceChildren();
+    empty.textContent = "正在读取服务端审计事件…";
+    try {
+      const data = await state.ledger.readEvents(0, 100);
+      if (!data || !data.ok || data.available === false) {
+        empty.textContent = "服务端审计未启用：当前仅本地模拟。配置 D1 binding PAPER_DB 与 PAPER_LEDGER_SECRET 后可保存研究运行记录。";
+        return;
+      }
+      const events = Array.isArray(data.events) ? data.events : [];
+      const runs = new Map();
+      const other = [];
+      for (const event of events) {
+        const payload = event.payload || {};
+        if (String(event.eventType || "").startsWith("agent.run.")) {
+          const id = payload.runId || event.eventId;
+          const current = runs.get(id) || {
+            id, provider: payload.provider || "—", model: payload.requestedModel || payload.model || "—",
+            status: "运行中", timestamp: event.createdAt, durationMs: null, tokens: null,
+            failedAgent: null, error: null
+          };
+          if (event.eventType === "agent.run.started") {
+            current.status = "运行中";
+            current.provider = payload.provider || current.provider;
+            current.model = payload.model || current.model;
+            current.timestamp = payload.startedAt || event.createdAt;
+          } else if (event.eventType === "agent.run.completed") {
+            current.status = "已完成";
+            current.provider = payload.provider || current.provider;
+            current.model = payload.requestedModel || current.model;
+            current.durationMs = payload.durationMs;
+            current.tokens = payload.usage && payload.usage.total_tokens;
+            current.timestamp = payload.completedAt || event.createdAt;
+          } else if (event.eventType === "agent.run.failed") {
+            current.status = "失败";
+            current.failedAgent = payload.failedAgent || null;
+            current.error = payload.error || null;
+            current.timestamp = payload.completedAt || event.createdAt;
+          }
+          runs.set(id, current);
+        } else {
+          other.push(event);
+        }
+      }
+      const rows = [
+        ...Array.from(runs.values()).map(run => ({
+          title: "六角色研究 · " + run.status,
+          meta: [run.provider, run.model, run.durationMs != null ? (run.durationMs / 1000).toFixed(1) + "s" : null, run.tokens != null ? run.tokens + " tokens" : null, run.failedAgent ? "阻塞角色 " + run.failedAgent : null].filter(Boolean).join(" · "),
+          id: run.id,
+          status: run.status,
+          time: run.timestamp,
+          detail: run.error
+        })),
+        ...other.slice(-20).map(event => {
+          const p = event.payload || {};
+          if (event.eventType === "paper.account.snapshot") {
+            const account = p.account || {};
+            return { title: "模拟账户快照", meta: [p.reason || "状态更新", Number.isFinite(Number(account.cash)) ? "现金 " + money(account.cash) : null, Array.isArray(account.trades) ? account.trades.length + " 笔成交" : null].filter(Boolean).join(" · "), id: event.eventId, status: "已备份", time: event.createdAt };
+          }
+          return { title: String(event.eventType || "事件"), meta: "服务端审计事件", id: event.eventId, status: "已记录", time: event.createdAt };
+        })
+      ].sort((a, b) => (Date.parse(b.time || 0) || 0) - (Date.parse(a.time || 0) || 0)).slice(0, 12);
+
+      if (!rows.length) {
+        empty.textContent = "尚无研究运行或模拟账户审计记录。";
+        return;
+      }
+      empty.textContent = "";
+      for (const item of rows) {
+        const row = document.createElement("div");
+        row.className = "audit-row";
+        const main = document.createElement("div");
+        main.className = "audit-main";
+        const title = document.createElement("strong");
+        title.textContent = item.title;
+        const meta = document.createElement("small");
+        meta.textContent = item.meta || "";
+        main.append(title, meta);
+        const right = document.createElement("div");
+        right.className = "audit-right";
+        const status = document.createElement("span");
+        status.className = "small-pill " + (item.status === "失败" ? "warning" : item.status === "已完成" || item.status === "已备份" ? "safe" : "");
+        status.textContent = item.status;
+        const time = document.createElement("time");
+        time.textContent = item.time ? new Date(item.time).toLocaleString("zh-CN", { hour12: false }) : "—";
+        const id = document.createElement("code");
+        id.textContent = String(item.id || "").slice(0, 18);
+        right.append(status, time, id);
+        row.append(main, right);
+        if (item.detail) {
+          const detail = document.createElement("small");
+          detail.className = "audit-detail";
+          detail.textContent = item.detail;
+          row.append(detail);
+        }
+        container.append(row);
+      }
+    } catch (_) {
+      empty.textContent = "审计记录读取失败；本地模拟账户不受影响。";
+    }
+  }
+  window.NRTradingRefreshAudit = refreshAudit;
+
   function setConnection(text, offline) {
     const el = $("connectionStatus"); if (!el) return;
     el.textContent = text; el.classList.toggle("offline", !!offline);
@@ -551,7 +657,7 @@
     const a = document.createElement("a"); a.href = url; a.download = "night-researcher-paper-trades.csv"; a.click(); URL.revokeObjectURL(url);
   }
   async function main() {
-    bindControls(); initChart(); renderAccount(); await refreshSnapshot(); await syncPaperLedger();
+    bindControls(); initChart(); renderAccount(); await refreshSnapshot(); await syncPaperLedger(); await refreshAudit();
     await Promise.allSettled([refreshKlines(), refreshDepth()]); connectSocket(); await loadResearchGates();
     state.restTimer = setInterval(() => { refreshSnapshot(); if (!state.socketReady) restFallback(); }, 12000);
     setInterval(() => { if (state.socketReady) refreshDepth().catch(() => {}); }, 15000);
