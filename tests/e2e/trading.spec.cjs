@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const paperLedgerByPage = new WeakMap();
 
 function marketDataRoute(route) {
   const url = new URL(route.request().url());
@@ -31,6 +32,30 @@ test.beforeEach(async ({ page }) => {
   await page.route("https://data-api.binance.vision/api/v3/**", marketDataRoute);
   await page.route("https://unpkg.com/**", route => route.abort());
   await page.route("https://cdn.jsdelivr.net/**", route => route.abort());
+  const paperEvents = [];
+  paperLedgerByPage.set(page, paperEvents);
+  await page.route("**/api/paper/session", route => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ ok: true, session: "created", expiresIn: 604800 })
+  }));
+  await page.route("**/api/paper/ledger**", async route => {
+    const request = route.request();
+    if (request.method() === "POST") {
+      const event = request.postDataJSON();
+      if (!paperEvents.some(item => item.eventId === event.eventId)) {
+        paperEvents.push({ seq: paperEvents.length + 1, ...event, createdAt: new Date().toISOString() });
+      }
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, accepted: [{ eventId: event.eventId }] }) });
+    }
+    const url = new URL(request.url());
+    const limit = Number(url.searchParams.get("limit") || 50);
+    let rows = paperEvents.slice();
+    if (url.searchParams.get("eventType")) rows = rows.filter(item => item.eventType === url.searchParams.get("eventType"));
+    if (url.searchParams.get("latest") === "1") rows = rows.slice(-limit);
+    else rows = rows.filter(item => item.seq > Number(url.searchParams.get("after") || 0)).slice(0, limit);
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, events: rows, nextAfter: rows.length ? rows[rows.length - 1].seq : 0 }) });
+  });
   await page.route("**/api/ai/chat", async route => {
     const payload = route.request().postDataJSON();
     const valid = !!payload.apiKey && Array.isArray(payload.messages);
@@ -50,6 +75,14 @@ test.beforeEach(async ({ page }) => {
       contentType: "application/json",
       body: JSON.stringify(valid ? {
         ok: true,
+        runId: payload.runId,
+        snapshotHash: "a".repeat(64),
+        provider: payload.provider,
+        requestedModel: payload.model,
+        promptVersion: "nr-agent-research-v1",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        durationMs: 1,
         roles: ["SPOTTER", "PRIOR", "EDGE", "KELLY", "TAKER", "CLOSER"],
         outputs: {
           SPOTTER: { title: "机会发现", opportunities: [] },
@@ -91,6 +124,26 @@ test("loads public market data and executes a depth-based paper market buy", asy
   expect(afterSelfTest.trades).toHaveLength(beforeSelfTest.trades);
 });
 
+test("server paper journal restores the account after local browser cache is cleared", async ({ page }) => {
+  const events = paperLedgerByPage.get(page);
+  await expect(page.locator("#paperLedgerStatus")).toContainText("服务端备份已同步");
+  await page.locator("#orderQty").fill("0.005");
+  await page.locator("#submitOrder").click();
+  await expect(page.locator("#orderFeedback")).toContainText("模拟成交成功");
+  await expect.poll(() => events.some(event =>
+    event.eventType === "paper.account.snapshot" &&
+    event.payload?.account?.trades?.length === 1
+  )).toBeTruthy();
+
+  await page.evaluate(() => localStorage.removeItem("night-researcher.paper.v1"));
+  await page.reload();
+  await expect(page.locator("#tradeCount")).toHaveText("1 笔");
+  await expect(page.locator("#paperLedgerStatus")).toContainText("已从服务端恢复模拟账户");
+  const restored = await page.evaluate(() => JSON.parse(localStorage.getItem("night-researcher.paper.v1")));
+  expect(restored.trades).toHaveLength(1);
+  expect(restored.cash).toBeLessThan(10000);
+});
+
 test("enforces the per-order risk cap before paper execution", async ({ page }) => {
   await expect(page.locator("#submitOrder")).toBeEnabled();
   await page.locator("#orderQty").fill("0.02");
@@ -128,6 +181,13 @@ test("AI Provider Center is visible and the six-agent flow never persists keys",
   await expect(page.locator("#aiTeamStatus")).toContainText("流程完成");
   await expect(page.locator("#aiOutput")).toContainText("SPOTTER");
   await expect(page.locator("#aiOutput")).toContainText("KELLY");
+  const events = paperLedgerByPage.get(page);
+  await expect.poll(() => events.some(event => event.eventType === "agent.run.started")).toBeTruthy();
+  await expect.poll(() => events.some(event => event.eventType === "agent.run.completed")).toBeTruthy();
+  const started = events.find(event => event.eventType === "agent.run.started");
+  const completed = events.find(event => event.eventType === "agent.run.completed");
+  expect(completed.payload.runId).toBe(started.payload.runId);
+  expect(completed.payload.outputs.KELLY.status).toBe("BLOCKED");
   const stored = await page.evaluate(() => JSON.stringify(localStorage));
   expect(stored).not.toContain("mm-team-browser-test-key-123456");
 });
