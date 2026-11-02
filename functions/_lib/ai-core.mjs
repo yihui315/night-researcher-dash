@@ -3,7 +3,8 @@ const REGION_HOSTS = Object.freeze({
   beijing: "cn-beijing",
   tokyo: "ap-northeast-1",
   frankfurt: "eu-central-1",
-  virginia: "us-east-1"
+  virginia: "us-east-1",
+  hongkong: "cn-hongkong"
 });
 
 const MINIMAX_ENDPOINTS = Object.freeze({
