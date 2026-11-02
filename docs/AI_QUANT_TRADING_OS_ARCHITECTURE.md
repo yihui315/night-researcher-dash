@@ -210,7 +210,7 @@ Live Trading：
 
 | 阶段 | 验收 |
 |---|---|
-| P0 基线/回测可信 | <badge>严格 Walk-forward 已实现</badge>；补 Sharpe/Sortino/Monte Carlo；持续验证无前视 |
+| P0 基线/回测可信 | 严格 Walk-forward 已实现；补 Sharpe/Sortino/Monte Carlo；持续验证无前视 |
 | P1 数据中心 | CEX depth sequence；Funding/OI/liquidations；RUNES/CRC20 代币级市场数据 |
 | P2 Paper Trading | 交易规则过滤器、部分成交、服务端 ledger、回放与幂等 |
 | P3 JEV 集成 | JEV React 19 页面、Provider Center/DPAPI、4779 API、WebSocket event bus |
