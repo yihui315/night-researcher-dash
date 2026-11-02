@@ -7,7 +7,7 @@
     { symbol: "ORDIUSDT", label: "ORDI" }, { symbol: "1000SATSUSDT", label: "1000SATS" }
   ];
   const INTERVALS = { "1m": 60, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 };
-  const state = { symbol: "BTCUSDT", interval: "4h", side: "BUY", tickers: {}, book: { bids: [], asks: [] }, klines: [], trades: [], socket: null, socketReady: false, reconnectTimer: null, socketGeneration: 0, chart: null, candleSeries: null, lastBar: null, account: window.NRPaper.loadAccount(), marks: {}, restTimer: null };
+  const state = { symbol: "BTCUSDT", interval: "4h", side: "BUY", tickers: {}, book: { bids: [], asks: [] }, bookUpdatedAt: 0, klines: [], trades: [], socket: null, socketReady: false, reconnectTimer: null, socketGeneration: 0, chart: null, candleSeries: null, lastBar: null, account: window.NRPaper.loadAccount(), marks: {}, restTimer: null };
   const $ = id => document.getElementById(id);
   const money = n => Number(n || 0).toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const num = (n, d) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: d == null ? 6 : d });
@@ -59,6 +59,7 @@
   async function refreshDepth() {
     const d = await getJSON(API + "/depth?symbol=" + state.symbol + "&limit=20");
     state.book = { bids: d.bids || [], asks: d.asks || [] };
+    state.bookUpdatedAt = Date.now();
     renderBook();
     const updates = window.NRPaper.processOpenOrders(state.account, state.symbol, state.book, marks());
     if (updates.length) { persist(); setFeedback("限价委托状态已更新：" + updates.map(x => x.id + " " + x.status).join("、"), "success"); }
@@ -310,6 +311,34 @@
     };
   };
 
+  window.NRTradingGetSnapshot = function () {
+    const account = window.NRPaper.summary(state.account, marks());
+    return {
+      capturedAt: Date.now(),
+      selectedSymbol: state.symbol,
+      interval: state.interval,
+      tickers: state.tickers,
+      orderBook: {
+        capturedAt: state.bookUpdatedAt,
+        bids: (state.book.bids || []).slice(0, 20).map(level => [Number(level[0]), Number(level[1])]),
+        asks: (state.book.asks || []).slice(0, 20).map(level => [Number(level[0]), Number(level[1])])
+      },
+      account: {
+        equity: account.equity,
+        availableCash: account.availableCash,
+        dailyPnl: account.dailyPnl,
+        realizedPnl: account.realizedPnl,
+        unrealizedPnl: account.unrealizedPnl,
+        drawdown: account.drawdown,
+        exposurePct: account.exposurePct
+      },
+      positions: state.account.positions,
+      risk: { dailyLossLocked: account.dailyLossLocked, drawdownLocked: account.drawdownLocked },
+      strategyMetrics: null,
+      executionMode: "paper-only"
+    };
+  };
+
   window.NRTradingSelectSymbol = selectSymbol;
   function connectSocket() {
     if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
@@ -333,7 +362,7 @@
             state.trades.unshift({ price: Number(d.p), qty: Number(d.q), time: Number(d.T), buyerMaker: !!d.m });
             if (state.trades.length > 40) state.trades.length = 40; renderTape();
           } else if (d.bids && d.asks) {
-            state.book = { bids: d.bids, asks: d.asks }; renderBook();
+            state.book = { bids: d.bids, asks: d.asks }; state.bookUpdatedAt = Date.now(); renderBook();
             const updates = window.NRPaper.processOpenOrders(state.account, state.symbol, state.book, marks());
             if (updates.length) persist();
             renderAccount();
