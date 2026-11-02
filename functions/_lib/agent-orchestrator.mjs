@@ -245,7 +245,18 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat) {
     }
     const result = await response.json();
     if (!response.ok || !result.ok) {
-      return json({ ok: false, runId, snapshotHash, startedAt, agent: role.id, error: result.error || "AI 研究步骤失败", partial: outputs, autoExecution: false }, response.status || 502);
+      return json({
+        ok: false,
+        runId,
+        snapshotHash,
+        startedAt,
+        agent: role.id,
+        error: result.error || "AI 研究步骤失败",
+        providerErrorCode: result.code || null,
+        finishReason: result.finishReason || null,
+        partial: outputs,
+        autoExecution: false
+      }, response.status || 502);
     }
 
     const parsed = parseAgentObject(result.text);
