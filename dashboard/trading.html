@@ -21,6 +21,7 @@
       <span class="mode-pill"><i></i> PAPER ONLY · 模拟账户</span>
       <span id="connectionStatus" class="connection"><i></i> 正在连接行情</span>
       <span id="lastUpdate" class="last-update">—</span>
+      <a class="ghost-btn" href="#aiProviderCenter">AI API 配置</a>
       <button id="exportTrades" class="ghost-btn">导出成交 CSV</button>
       <button id="resetAccount" class="ghost-btn danger-ghost">重置模拟账户</button>
     </div>
@@ -35,6 +36,76 @@
       </div>
       <div class="hero-note"><b>安全模式</b><span>仅模拟现货，不连接钱包、不使用交易密钥、不发送真实订单。</span></div>
     </section>
+
+    <article id="aiProviderCenter" class="panel ai-panel ai-provider-center">
+          <div class="panel-head compact">
+            <div><div class="panel-kicker">AI PROVIDER CENTER · API CONFIGURATION</div><h2>AI 模型与 API 配置</h2></div>
+            <span id="aiStatus" class="small-pill ai-status">未连接</span>
+          </div>
+          <label class="field-label" for="aiProvider">AI 服务商 / 模型</label>
+          <select id="aiProvider" class="field-control">
+            <option value="minimax">MiniMax M3</option>
+            <option value="qwen">Qwen Coder · Model Studio</option>
+          </select>
+          <div id="minimaxFields" class="ai-config">
+            <label class="field-label" for="minimaxRegion">MiniMax API 区域（必须与 Key 所属站点一致）</label>
+            <select id="minimaxRegion" class="field-control">
+              <option value="china" selected>中国站 · api.minimaxi.com</option>
+              <option value="global">国际站 · api.minimax.io</option>
+            </select>
+            <label class="field-label" for="minimaxApiKey">MiniMax API Key</label>
+            <input id="minimaxApiKey" class="field-control" type="password" autocomplete="off" spellcheck="false" placeholder="输入 MiniMax API Key">
+            <small class="ai-note">OpenAI 兼容接口；支持 MiniMax-M3。中国站与国际站的 API Key 和域名必须匹配。</small>
+          </div>
+          <div id="qwenFields" class="ai-config hidden">
+            <label class="field-label" for="qwenRegion">Model Studio 区域</label>
+            <select id="qwenRegion" class="field-control">
+              <option value="singapore">新加坡</option>
+              <option value="beijing">中国（北京）</option>
+              <option value="tokyo">日本东京</option>
+              <option value="frankfurt">德国法兰克福</option>
+              <option value="virginia">美国弗吉尼亚</option>
+            </select>
+            <label class="field-label" for="qwenModel">Qwen 模型</label>
+            <select id="qwenModel" class="field-control">
+              <option value="qwen3-coder-next" selected>Qwen3-Coder-Next · 编程模型</option>
+              <option value="qwen3-coder-plus">Qwen3-Coder-Plus · 兼容旧版</option>
+              <option value="qwen3.8-max">Qwen3.8-Max · 高阶研究/推理</option>
+              <option value="qwen3.7-plus">Qwen3.7-Plus · 通用研究</option>
+              <option value="qwen3.6-plus">Qwen3.6-Plus · 通用研究/多模态</option>
+            </select>
+            <label class="field-label" for="qwenWorkspaceId">Workspace ID</label>
+            <input id="qwenWorkspaceId" class="field-control" type="text" autocomplete="off" spellcheck="false" placeholder="填写百炼工作空间 ID">
+            <label class="field-label" for="qwenApiKey">Model Studio 通用 API Key</label>
+            <input id="qwenApiKey" class="field-control" type="password" autocomplete="off" spellcheck="false" placeholder="输入 sk- 开头的通用 API Key">
+            <small class="ai-note warning-note">重要：这里使用按 Token 计费的 Model Studio 通用 API Key。Coding Plan 的 sk-sp- 密钥仅限 Qwen Code 等交互式编程工具，不可用于本应用后端。</small>
+          </div>
+          <div class="ai-actions">
+            <button id="aiTest" class="ghost-btn">测试 API 连接</button>
+            <button id="aiClearKey" class="ghost-btn">清空当前密钥</button>
+          </div>
+          <div class="ai-actions">
+            <button id="paperSelfTestBtn" class="ghost-btn">运行当前盘口模拟自检</button>
+            <span id="paperSelfTestStatus" class="small-pill ai-status">未运行</span>
+          </div>
+          <div id="paperSelfTestResult" class="ai-selftest-result">使用当前真实公开盘口，在独立临时账户中完成一笔小额买入/卖出往返；不影响主模拟账户，不写入本地存储。</div>
+          <label class="field-label" for="aiPrompt">研究任务</label>
+          <textarea id="aiPrompt" class="field-control ai-prompt" rows="4">分析当前市场结构和模拟账户。提出 2–3 个可证伪的策略假设，列出入场触发、退出/失效条件、交易成本、风险预算和需要补充的数据。不要给出真实下单指令。</textarea>
+          <div class="ai-actions">
+            <button id="aiRun" class="submit-order buy">运行 AI 研究分析</button>
+            <button id="aiClearChat" class="ghost-btn">清空对话</button>
+          </div>
+          <div class="ai-actions team-actions">
+            <button id="aiTeamRun" class="submit-order buy">运行六 Agent 研究流程</button>
+            <span id="aiTeamStatus" class="small-pill ai-status">六角色待命</span>
+          </div>
+          <div class="ai-note">六角色流程会触发 4 次模型调用；KELLY 和 TAKER 由确定性程序计算。不会自动创建模拟单或真实订单。</div>
+          <div id="aiTeamOutput" class="ai-output team-output" aria-live="polite"><div class="ai-placeholder">SPOTTER → PRIOR → EDGE → KELLY → TAKER → CLOSER。等待启动。</div></div>
+          <div id="aiOutput" class="ai-output" aria-live="polite">
+            <div class="ai-placeholder">输入 API Key 后先测试连接。AI 将读取当前页面可见的行情、盘口、模拟账户和策略门禁数据。</div>
+          </div>
+          <div class="ticket-disclaimer">密钥只在当前页面内存中使用，不写入 localStorage、Cookie 或 GitHub；请求经同站 HTTPS 函数转发给所选模型服务商。刷新页面后需要重新输入。AI 只提供研究意见，不会下单。</div>
+        </article>
 
     <section class="metric-grid">
       <article class="metric-card primary-metric"><span>模拟账户净值</span><strong id="equityValue">$10,000.00</strong><small id="equitySub">初始资金 $10,000 USDT</small></article>
@@ -130,67 +201,7 @@
           <div class="ticket-disclaimer">规则观察模型，未经样本外验证，不构成买卖建议；不会自动下单。</div>
         </article>
 
-        <article class="panel ai-panel">
-          <div class="panel-head compact">
-            <div><div class="panel-kicker">AI RESEARCH COPILOT</div><h2>AI 研究副驾驶</h2></div>
-            <span id="aiStatus" class="small-pill ai-status">未连接</span>
-          </div>
-          <label class="field-label" for="aiProvider">AI 服务商 / 模型</label>
-          <select id="aiProvider" class="field-control">
-            <option value="minimax">MiniMax M3</option>
-            <option value="qwen">Qwen Coder · Model Studio</option>
-          </select>
-          <div id="minimaxFields" class="ai-config">
-            <label class="field-label" for="minimaxRegion">MiniMax API 区域（必须与 Key 所属站点一致）</label>
-            <select id="minimaxRegion" class="field-control">
-              <option value="china" selected>中国站 · api.minimaxi.com</option>
-              <option value="global">国际站 · api.minimax.io</option>
-            </select>
-            <label class="field-label" for="minimaxApiKey">MiniMax API Key</label>
-            <input id="minimaxApiKey" class="field-control" type="password" autocomplete="off" spellcheck="false" placeholder="输入 MiniMax API Key">
-            <small class="ai-note">OpenAI 兼容接口；支持 MiniMax-M3。中国站与国际站的 API Key 和域名必须匹配。</small>
-          </div>
-          <div id="qwenFields" class="ai-config hidden">
-            <label class="field-label" for="qwenRegion">Model Studio 区域</label>
-            <select id="qwenRegion" class="field-control">
-              <option value="singapore">新加坡</option>
-              <option value="beijing">中国（北京）</option>
-              <option value="tokyo">日本东京</option>
-              <option value="frankfurt">德国法兰克福</option>
-              <option value="virginia">美国弗吉尼亚</option>
-            </select>
-            <label class="field-label" for="qwenModel">Qwen 模型</label>
-            <select id="qwenModel" class="field-control">
-              <option value="qwen3-coder-plus" selected>Qwen3-Coder-Plus · 专业代码模型</option>
-              <option value="qwen3.7-plus">Qwen3.7-Plus · 通用研究/推理</option>
-              <option value="qwen3.6-plus">Qwen3.6-Plus · 通用研究/多模态</option>
-            </select>
-            <label class="field-label" for="qwenWorkspaceId">Workspace ID</label>
-            <input id="qwenWorkspaceId" class="field-control" type="text" autocomplete="off" spellcheck="false" placeholder="填写百炼工作空间 ID">
-            <label class="field-label" for="qwenApiKey">Model Studio 通用 API Key</label>
-            <input id="qwenApiKey" class="field-control" type="password" autocomplete="off" spellcheck="false" placeholder="输入 sk- 开头的通用 API Key">
-            <small class="ai-note warning-note">重要：这里使用按 Token 计费的 Model Studio 通用 API Key。Coding Plan 的 sk-sp- 密钥仅限 Qwen Code 等交互式编程工具，不可用于本应用后端。</small>
-          </div>
-          <div class="ai-actions">
-            <button id="aiTest" class="ghost-btn">测试 API 连接</button>
-            <button id="aiClearKey" class="ghost-btn">清空当前密钥</button>
-          </div>
-          <div class="ai-actions">
-            <button id="paperSelfTestBtn" class="ghost-btn">运行当前盘口模拟自检</button>
-            <span id="paperSelfTestStatus" class="small-pill ai-status">未运行</span>
-          </div>
-          <div id="paperSelfTestResult" class="ai-selftest-result">使用当前真实公开盘口，在独立临时账户中完成一笔小额买入/卖出往返；不影响主模拟账户，不写入本地存储。</div>
-          <label class="field-label" for="aiPrompt">研究任务</label>
-          <textarea id="aiPrompt" class="field-control ai-prompt" rows="4">分析当前市场结构和模拟账户。提出 2–3 个可证伪的策略假设，列出入场触发、退出/失效条件、交易成本、风险预算和需要补充的数据。不要给出真实下单指令。</textarea>
-          <div class="ai-actions">
-            <button id="aiRun" class="submit-order buy">运行 AI 研究分析</button>
-            <button id="aiClearChat" class="ghost-btn">清空对话</button>
-          </div>
-          <div id="aiOutput" class="ai-output" aria-live="polite">
-            <div class="ai-placeholder">输入 API Key 后先测试连接。AI 将读取当前页面可见的行情、盘口、模拟账户和策略门禁数据。</div>
-          </div>
-          <div class="ticket-disclaimer">密钥只在当前页面内存中使用，不写入 localStorage、Cookie 或 GitHub；请求经同站 HTTPS 函数转发给所选模型服务商。刷新页面后需要重新输入。AI 只提供研究意见，不会下单。</div>
-        </article>
+
 
         <article class="panel market3d-panel">
           <div class="panel-head compact"><div><div class="panel-kicker">MARKET CONSTELLATION</div><h2>3D 市场宇宙</h2></div><span class="small-pill">DRAG TO ROTATE</span></div>
