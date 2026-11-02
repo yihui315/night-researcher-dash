@@ -10,7 +10,7 @@ Copy:
 
 to JEV's `src/features/trading/services/`, then import `createTradingApi` from the Trading Desk feature.
 
-The default base path is same-origin `/api/v1/trading`; JEV Vite/production routing must proxy that path to the local JEV backend on port 4779. Do not point the cloud-hosted Pages preview at `127.0.0.1`.
+The adapter exposes `getProviderHealth()` against the existing same-origin `/api/health` route, and Trading Desk methods against `/api/v1/trading`. JEV Vite/production routing must proxy these paths to the local JEV backend on port 4779. Provider health being live does not imply the new trading routes exist. Do not point the cloud-hosted Pages preview at `127.0.0.1`.
 
 ## Credential and execution rules
 
