@@ -91,7 +91,7 @@
     }
 
     async function latestSnapshot() {
-      const data = await requestLedger("?latest=1&limit=100", { method: "GET" });
+      const data = await requestLedger("?latest=1&eventType=paper.account.snapshot&limit=1", { method: "GET" });
       const events = Array.isArray(data.events) ? data.events : [];
       for (let i = events.length - 1; i >= 0; i--) {
         const event = events[i];
