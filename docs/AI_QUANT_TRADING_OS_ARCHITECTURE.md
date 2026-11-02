@@ -115,6 +115,7 @@ P1 数据接入顺序：
 - 当前六角色共享同一组 Provider/Model 配置；未来在 JEV Provider Center 按 Agent 映射不同模型。
 - 当前是串行角色提示词工作流，不应宣传为六个独立模型/自治 Agent 集群。
 - 每次研究请求现在带有 `runId`、市场快照 SHA-256、prompt version、provider/model、开始/完成时间、耗时和 Token 用量；浏览器将研究开始/完成/失败事件追加到 D1 事件日志（D1 未配置时保留在页面运行记录，不宣称云端持久化）。
+- MiniMax 六角色结构化调用使用 `thinking: disabled` + 4096 completion tokens，避免 adaptive thinking 占用结构化 JSON 的输出预算；普通研究对话保留 adaptive thinking。服务端只解析最终 `message.content`，不把 `reasoning_content` 当成最终答案或显示给用户。若 `finish_reason=length` 且最终 content 为空，明确返回 `EMPTY_FINAL_CONTENT`。
 - KELLY 的 Wilson 下界 + 1/4 Kelly 计算函数和 TAKER 提案函数已有单元测试；但 Agent API 当前刻意向 KELLY 传入 `null`，不接受浏览器提交的策略统计，原因是服务端可信研究账本尚未建设。因此当前线上流程 KELLY 恒为 0，TAKER 恒阻断；未来接入服务端签名/版本化研究结果后才能解锁。
 
 ### Layer 4 — 独立验证、风险与执行
