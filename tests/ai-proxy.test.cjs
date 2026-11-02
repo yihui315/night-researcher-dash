@@ -215,3 +215,59 @@ test("Qwen Model Studio supports the documented Hong Kong workspace endpoint", a
   assert.equal(response.status, 200);
   assert.equal(calledUrl, "https://ws-hk.cn-hongkong.maas.aliyuncs.com/compatible-mode/v1/chat/completions");
 });
+
+
+test("AI proxy extracts OpenAI-compatible output_text content blocks", async () => {
+  const { handleAiChat } = await corePromise;
+  const response = await handleAiChat(makeRequest({
+    provider: "minimax", model: "MiniMax-M3", region: "china", apiKey: "mm-test-key-123456",
+    messages: [{ role: "user", content: "只回复 JSON" }]
+  }), async () => new Response(JSON.stringify({
+    id: "chatcmpl-output-block",
+    choices: [{ finish_reason: "stop", message: { content: [
+      { type: "output_text", text: "{\\"opportunities\\":[]}" },
+      { type: "text", text: "" }
+    ] } }],
+    usage: { prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 }
+  }), { status: 200, headers: { "content-type": "application/json" } }));
+  const data = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(data.text, "{\\"opportunities\\":[]}");
+});
+
+test("AI proxy returns redacted diagnostics when provider returns reasoning but no final content", async () => {
+  const { handleAiChat } = await corePromise;
+  const response = await handleAiChat(makeRequest({
+    provider: "minimax", model: "MiniMax-M3", region: "china", apiKey: "mm-test-key-123456",
+    messages: [{ role: "user", content: "只回复 JSON" }]
+  }), async () => new Response(JSON.stringify({
+    id: "chatcmpl-reasoning-only",
+    choices: [{ finish_reason: "stop", message: { content: null, reasoning_content: "PRIVATE_REASONING_MUST_NOT_LEAK" } }],
+    usage: { prompt_tokens: 40, completion_tokens: 900, total_tokens: 940 }
+  }), { status: 200, headers: { "content-type": "application/json" } }));
+  const data = await response.json();
+  assert.equal(response.status, 502);
+  assert.equal(data.code, "EMPTY_FINAL_CONTENT");
+  assert.equal(data.hasReasoningContent, true);
+  assert.equal(data.finishReason, "stop");
+  assert.equal(data.usage.completion_tokens, 900);
+  assert.doesNotMatch(JSON.stringify(data), /PRIVATE_REASONING_MUST_NOT_LEAK|mm-test-key-123456/);
+});
+
+test("AI proxy diagnoses an output token limit without exposing upstream payload", async () => {
+  const { handleAiChat } = await corePromise;
+  const response = await handleAiChat(makeRequest({
+    provider: "minimax", model: "MiniMax-M3", region: "china", apiKey: "mm-test-key-123456",
+    messages: [{ role: "user", content: "只回复 JSON" }]
+  }), async () => new Response(JSON.stringify({
+    id: "chatcmpl-length",
+    choices: [{ finish_reason: "length", message: { content: null, reasoning_content: "PRIVATE_REASONING_MUST_NOT_LEAK" } }],
+    usage: { prompt_tokens: 4000, completion_tokens: 8192, total_tokens: 12192 }
+  }), { status: 200, headers: { "content-type": "application/json" } }));
+  const data = await response.json();
+  assert.equal(response.status, 502);
+  assert.equal(data.finishReason, "length");
+  assert.equal(data.usage.completion_tokens, 8192);
+  assert.match(data.error, /Token 上限/);
+  assert.doesNotMatch(JSON.stringify(data), /PRIVATE_REASONING_MUST_NOT_LEAK/);
+});
