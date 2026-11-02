@@ -7,7 +7,7 @@
     { symbol: "ORDIUSDT", label: "ORDI" }, { symbol: "1000SATSUSDT", label: "1000SATS" }
   ];
   const INTERVALS = { "1m": 60, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 };
-  const state = { symbol: "BTCUSDT", interval: "4h", side: "BUY", tickers: {}, book: { bids: [], asks: [] }, bookUpdatedAt: 0, klines: [], trades: [], socket: null, socketReady: false, reconnectTimer: null, socketGeneration: 0, depthBook: window.NRDepthBook.create(20), depthBuffer: [], depthSynced: false, depthResyncing: false, chart: null, candleSeries: null, lastBar: null, account: window.NRPaper.loadAccount(), marks: {}, restTimer: null };
+  const state = { symbol: "BTCUSDT", interval: "4h", side: "BUY", tickers: {}, book: { bids: [], asks: [] }, bookUpdatedAt: 0, klines: [], trades: [], socket: null, socketReady: false, reconnectTimer: null, socketGeneration: 0, depthBook: window.NRDepthBook.create(20), depthBuffer: [], depthSynced: false, depthResyncing: false, chart: null, candleSeries: null, lastBar: null, account: window.NRPaper.loadAccount(), marks: {}, restTimer: null, ledger: window.NRPaperLedger.createClient() };
   const $ = id => document.getElementById(id);
   const money = n => Number(n || 0).toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const num = (n, d) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: d == null ? 6 : d });
@@ -24,7 +24,57 @@
     finally { clearTimeout(timeout); }
   }
   function marks() { const m = {}; Object.keys(state.tickers).forEach(s => { m[s] = state.tickers[s].price; }); return m; }
-  function persist() { window.NRPaper.saveAccount(state.account); renderAccount(); }
+  function setLedgerStatus(message, mode) {
+    const el = $("paperLedgerStatus");
+    if (!el) return;
+    el.textContent = message;
+    el.dataset.state = mode || "neutral";
+    el.classList.toggle("warning", mode === "warning");
+    el.classList.toggle("safe", mode === "ready");
+  }
+  function persist(reason) {
+    state.account.updatedAt = new Date().toISOString();
+    window.NRPaper.saveAccount(state.account);
+    renderAccount();
+    if (!state.ledger) return;
+    state.ledger.appendSnapshot(state.account, marks(), reason || "state-change")
+      .then(result => {
+        if (result && result.ok) setLedgerStatus("服务端备份已同步", "ready");
+        else setLedgerStatus("仅本地 · 服务端账本未配置", "warning");
+      })
+      .catch(() => setLedgerStatus("本地缓存 · 云端同步失败", "warning"));
+  }
+  async function syncPaperLedger() {
+    setLedgerStatus("服务端账本连接中", "neutral");
+    try {
+      const session = await state.ledger.startSession();
+      if (!session.available) {
+        setLedgerStatus("仅本地 · 服务端账本未配置", "warning");
+        return;
+      }
+      const remote = await state.ledger.latestSnapshot();
+      if (!remote) {
+        const result = await state.ledger.appendSnapshot(state.account, marks(), "session-bootstrap");
+        setLedgerStatus(result && result.ok ? "服务端备份已同步" : "仅本地 · 服务端账本未配置", result && result.ok ? "ready" : "warning");
+        return;
+      }
+      const localTime = Date.parse(state.account.updatedAt || state.account.createdAt || 0) || 0;
+      const remoteTime = Date.parse(remote.account.updatedAt || remote.account.createdAt || remote.event.createdAt || 0) || 0;
+      if (remoteTime > localTime) {
+        state.account = remote.account;
+        window.NRPaper.saveAccount(state.account);
+        renderAccount();
+        setLedgerStatus("已从服务端恢复模拟账户", "ready");
+      } else if (localTime > remoteTime) {
+        const result = await state.ledger.appendSnapshot(state.account, marks(), "local-newer-than-server");
+        setLedgerStatus(result && result.ok ? "本地状态已备份" : "仅本地 · 云端同步失败", result && result.ok ? "ready" : "warning");
+      } else {
+        setLedgerStatus("服务端备份已同步", "ready");
+      }
+    } catch (_) {
+      setLedgerStatus("本地缓存 · 云端同步失败", "warning");
+    }
+  }
   function setConnection(text, offline) {
     const el = $("connectionStatus"); if (!el) return;
     el.textContent = text; el.classList.toggle("offline", !!offline);
@@ -241,7 +291,7 @@
   function submitOrder() {
     try {
       const result = window.NRPaper.placeOrder(state.account, { symbol: state.symbol, side: state.side, type: $("orderType").value, qty: Number($("orderQty").value), limitPrice: Number($("limitPrice").value) }, state.book, marks());
-      persist(); $("orderQty").value = "";
+      persist("order-submitted-" + String(result.status || "unknown").toLowerCase()); $("orderQty").value = "";
       setFeedback(result.status === "FILLED" ? "模拟成交成功：" + result.order.side + " " + num(result.order.filledQty, 7) + " @ " + priceFmt(result.order.avgFillPrice) : "限价委托已挂出：" + result.order.id + "。触价且可见深度足够时尝试模拟成交。", "success");
     } catch (e) { setFeedback(e.message || "订单未能提交", "error"); }
     updateEstimate();
@@ -259,8 +309,8 @@
       $("orderQty").value = (base * p / price / (state.side === "BUY" ? 1.001 : 1)).toPrecision(7); updateEstimate();
     }));
     $("submitOrder").addEventListener("click", submitOrder);
-    $("openOrdersBody").addEventListener("click", e => { const b = e.target.closest("[data-cancel]"); if (!b) return; if (window.NRPaper.cancelOrder(state.account, b.dataset.cancel)) { persist(); setFeedback("已撤销模拟委托 " + b.dataset.cancel, "success"); } });
-    $("resetAccount").addEventListener("click", () => { if (!confirm("确定清空当前浏览器中的全部模拟持仓、挂单和成交记录，并恢复 $10,000 初始资金？")) return; state.account = window.NRPaper.resetAccount(); persist(); setFeedback("模拟账户已重置。", "success"); });
+    $("openOrdersBody").addEventListener("click", e => { const b = e.target.closest("[data-cancel]"); if (!b) return; if (window.NRPaper.cancelOrder(state.account, b.dataset.cancel)) { persist("order-cancelled"); setFeedback("已撤销模拟委托 " + b.dataset.cancel, "success"); } });
+    $("resetAccount").addEventListener("click", () => { if (!confirm("确定清空当前浏览器中的全部模拟持仓、挂单和成交记录，并恢复 $10,000 初始资金？")) return; state.account = window.NRPaper.resetAccount(); persist("account-reset"); setFeedback("模拟账户已重置。", "success"); });
     $("exportTrades").addEventListener("click", exportTrades);
     window.addEventListener("resize", () => { if (state.chart) state.chart.applyOptions({ width: $("priceChart").clientWidth, height: $("priceChart").clientHeight }); else drawFallbackChart(); });
   }
@@ -346,7 +396,7 @@
     state.bookUpdatedAt = Date.now();
     renderBook();
     const updates = window.NRPaper.processOpenOrders(state.account, state.symbol, state.book, marks());
-    if (updates.length) persist();
+    if (updates.length) persist("open-order-state-change");
     renderAccount();
   }
 
@@ -498,7 +548,7 @@
     const a = document.createElement("a"); a.href = url; a.download = "night-researcher-paper-trades.csv"; a.click(); URL.revokeObjectURL(url);
   }
   async function main() {
-    bindControls(); initChart(); renderAccount(); await refreshSnapshot();
+    bindControls(); initChart(); renderAccount(); await refreshSnapshot(); await syncPaperLedger();
     await Promise.allSettled([refreshKlines(), refreshDepth()]); connectSocket(); await loadResearchGates();
     state.restTimer = setInterval(() => { refreshSnapshot(); if (!state.socketReady) restFallback(); }, 12000);
     setInterval(() => { if (state.socketReady) refreshDepth().catch(() => {}); }, 15000);
