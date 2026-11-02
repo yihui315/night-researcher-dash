@@ -194,7 +194,7 @@ Live Trading：
 ### Qwen Coder / Model Studio
 - 首选编码模型：`qwen3-coder-next`；兼容旧版 `qwen3-coder-plus`。
 - 研究模型：`qwen3.8-max`、`qwen3.7-plus`。
-- Model Studio API Key 必须与 Workspace ID 和地域匹配；本应用走 Model Studio 按量 OpenAI-compatible endpoint。
+- Model Studio API Key 必须与 Workspace ID 和地域匹配；本应用走 Model Studio 按量 OpenAI-compatible endpoint。当前支持北京、新加坡、东京、法兰克福、弗吉尼亚和香港工作空间域名。
 - `sk-sp-` 是 Coding Plan 专用 Key，必须配套 `coding.dashscope.aliyuncs.com`；官方条款限定用于交互式编程工具，禁止用于自动化脚本或应用后端。本应用不得接收它。
 - 当前页面仅在内存中保留 key；正式 JEV 集成应通过 Provider Center + DPAPI SecretStore 在本机加密保存，前端只引用 provider id，不读取明文 key。
 
