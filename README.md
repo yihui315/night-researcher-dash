@@ -62,6 +62,10 @@ dashboard/
 
 - **AI API 独立输入页**：`/ai-settings.html`。可配置 MiniMax M3 或 Qwen Coder，填写区域、Workspace ID 和 API Key，并点击「测试 API 连接」。
 - **交易终端**：`/trading.html`。提供实时行情、K线、diff-depth 盘口、逐笔成交、模拟账户和 AI 六角色研究入口。
+- **服务端模拟账本（可选 D1）**：新增 `POST /api/paper/session`、`GET/POST /api/paper/ledger`、HMAC 签名 HttpOnly 会话、append-only 事件表和本地快照恢复。需要按 `docs/CLOUDFLARE_D1_PAPER_LEDGER_SETUP.md` 配置 D1 binding `PAPER_DB` 与 `PAPER_LEDGER_SECRET`；未配置时 UI 明确显示仅本地模式。
+- **研究可追踪**：六 Agent API 返回 `runId`、`snapshotHash`、prompt version、provider/model、耗时和 token usage；交易页将研究开始/完成/失败事件与模拟账户快照写入同一会话账本。
+- **信任边界**：当前 D1 是浏览器生成快照的审计/恢复日志，不是权威执行账本；不能作为 Kelly、策略晋级或实盘授权依据。服务端确定性模拟撮合仍是下一阶段。
+- **D1 配置指南**：`docs/CLOUDFLARE_D1_PAPER_LEDGER_SETUP.md`。
 - **研究首页**：`/index.html`。顶部提供交易终端与 AI API 设置快捷入口。
 - **本地预览**：`cd dashboard && python -m http.server 8765`，访问 `http://localhost:8765/ai-settings.html` 或 `http://localhost:8765/trading.html`。
 - MiniMax 使用对应中国站 / 国际站的 API Key；Qwen 使用与 Workspace / 区域匹配的 Model Studio 通用 API Key。不要把 API Key 粘贴到聊天、提交到 Git 或写入浏览器存储。
