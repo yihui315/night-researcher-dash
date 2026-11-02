@@ -216,7 +216,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     if (!$("aiProvider")) return;
     $("aiProvider").addEventListener("change", providerFields);
-    $("paperSelfTestBtn").addEventListener("click", () => {
+    if ($("paperSelfTestBtn")) $("paperSelfTestBtn").addEventListener("click", () => {
       try {
         const result = window.NRTradingRunPaperSelfTest();
         const price = value => Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 8 });
@@ -240,7 +240,7 @@
     });
     $("aiTest").addEventListener("click", () => run("test"));
     $("aiRun").addEventListener("click", () => run("analysis"));
-    $("aiTeamRun").addEventListener("click", runTeam);
+    if ($("aiTeamRun")) $("aiTeamRun").addEventListener("click", runTeam);
     $("aiClearKey").addEventListener("click", () => {
       const provider = $("aiProvider").value;
       if (provider === "minimax") $("minimaxApiKey").value = "";
