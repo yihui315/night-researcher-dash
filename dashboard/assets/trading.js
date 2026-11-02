@@ -7,7 +7,8 @@
     { symbol: "ORDIUSDT", label: "ORDI" }, { symbol: "1000SATSUSDT", label: "1000SATS" }
   ];
   const INTERVALS = { "1m": 60, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 };
-  const state = { symbol: "BTCUSDT", interval: "4h", side: "BUY", tickers: {}, book: { bids: [], asks: [] }, bookUpdatedAt: 0, klines: [], trades: [], socket: null, socketReady: false, reconnectTimer: null, socketGeneration: 0, depthBook: window.NRDepthBook.create(20), depthBuffer: [], depthSynced: false, depthResyncing: false, chart: null, candleSeries: null, lastBar: null, account: window.NRPaper.loadAccount(), marks: {}, restTimer: null, ledger: window.NRPaperLedger.createClient() };
+  const hasLocalPaperAccount = (() => { try { return !!localStorage.getItem(window.NRPaper.STORAGE_KEY); } catch (_) { return false; } })();
+  const state = { localAccountPresent: hasLocalPaperAccount, symbol: "BTCUSDT", interval: "4h", side: "BUY", tickers: {}, book: { bids: [], asks: [] }, bookUpdatedAt: 0, klines: [], trades: [], socket: null, socketReady: false, reconnectTimer: null, socketGeneration: 0, depthBook: window.NRDepthBook.create(20), depthBuffer: [], depthSynced: false, depthResyncing: false, chart: null, candleSeries: null, lastBar: null, account: window.NRPaper.loadAccount(), marks: {}, restTimer: null, ledger: window.NRPaperLedger.createClient() };
   const $ = id => document.getElementById(id);
   const money = n => Number(n || 0).toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const num = (n, d) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: d == null ? 6 : d });
@@ -34,6 +35,7 @@
   }
   function persist(reason) {
     state.account.updatedAt = new Date().toISOString();
+    state.localAccountPresent = true;
     window.NRPaper.saveAccount(state.account);
     renderAccount();
     if (!state.ledger) return;
@@ -60,8 +62,9 @@
       }
       const localTime = Date.parse(state.account.updatedAt || state.account.createdAt || 0) || 0;
       const remoteTime = Date.parse(remote.account.updatedAt || remote.account.createdAt || remote.event.createdAt || 0) || 0;
-      if (remoteTime > localTime) {
+      if (!state.localAccountPresent || remoteTime > localTime) {
         state.account = remote.account;
+        state.localAccountPresent = true;
         window.NRPaper.saveAccount(state.account);
         renderAccount();
         setLedgerStatus("已从服务端恢复模拟账户", "ready");
