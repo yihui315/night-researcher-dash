@@ -8,13 +8,19 @@ const ALLOWED_EVENTS = new Set([
   "paper.order.created",
   "paper.order.updated",
   "paper.order.cancelled",
-  "paper.account.reset",
+  "paper.account.reset"
+]);
+const TRUSTED_EVENTS = new Set([
   "agent.run.started",
   "agent.run.completed",
   "agent.run.failed",
   "strategy.gate.passed",
   "strategy.gate.rejected",
-  "risk.decision"
+  "risk.decision",
+  "paper.server.order.created",
+  "paper.server.order.filled",
+  "paper.server.order.rejected",
+  "paper.server.order.cancelled"
 ]);
 
 function json(body, status = 200, headers = {}) {
@@ -80,7 +86,7 @@ function cookieValue(request) {
 }
 
 function cookieHeader(token, maxAge) {
-  return COOKIE_NAME + "=" + encodeURIComponent(token) + "; Path=/api/paper; Max-Age=" + maxAge + "; HttpOnly; Secure; SameSite=Strict";
+  return COOKIE_NAME + "=" + encodeURIComponent(token) + "; Path=/api/; Max-Age=" + maxAge + "; HttpOnly; Secure; SameSite=Strict";
 }
 
 function requireConfig(env) {
@@ -143,6 +149,24 @@ async function parseBody(request) {
   if (raw.length > MAX_BODY_BYTES) return { error: json({ ok: false, error: "请求内容过大" }, 413) };
   try { return { body: JSON.parse(raw) }; }
   catch (_) { return { error: json({ ok: false, error: "JSON 请求体无效" }, 400) }; }
+}
+
+export async function appendTrustedEvent(request, env, event) {
+  try {
+    const config = requireConfig(env);
+    if (config.error || !event || !TRUSTED_EVENTS.has(event.eventType)) return false;
+    const auth = await readSession(request, env);
+    if (auth.error) return false;
+    if (typeof event.eventId !== "string" || !/^[a-zA-Z0-9._:-]{8,100}$/.test(event.eventId)) return false;
+    const payloadJson = JSON.stringify(event.payload == null ? {} : event.payload);
+    if (new TextEncoder().encode(payloadJson).byteLength > MAX_EVENT_BYTES) return false;
+    await env.PAPER_DB.prepare(
+      "INSERT OR IGNORE INTO paper_events (session_id, event_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)"
+    ).bind(auth.session.sid, event.eventId, event.eventType, payloadJson, new Date().toISOString()).run();
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 export async function handlePaperLedger(request, env) {
@@ -215,4 +239,4 @@ export async function handlePaperLedger(request, env) {
   return json({ ok: true, accepted, duplicateSafe: true });
 }
 
-export const __test = { verifyToken, signPayload, cookieValue, ALLOWED_EVENTS };
+export const __test = { verifyToken, signPayload, cookieValue, ALLOWED_EVENTS, TRUSTED_EVENTS };
