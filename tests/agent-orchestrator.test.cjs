@@ -54,7 +54,7 @@ test("TAKER can only produce a proposal and never auto-submit", async () => {
   });
   const now = Date.now();
   const plan = buildTakerPlan(
-    { symbol: "BTCUSDT", side: "BUY" },
+    { symbol: "BTCUSDT", side: "BUY", verdict: "RESEARCH" },
     kelly,
     { structuredMarket: {
       selectedSymbol: "BTCUSDT",
@@ -95,7 +95,7 @@ test("six-role pipeline calls four AI roles and keeps execution disabled", async
     model: "MiniMax-M3",
     apiKey: "mm-test-key-123456",
     region: "china",
-    snapshot: { selectedSymbol: "BTCUSDT", tickers: {}, strategyMetrics: null }
+    snapshot: { selectedSymbol: "BTCUSDT", tickers: {}, strategyMetrics: { strategyPass: true, oosPass: true, sampleCount: 1000, oosTrades: 100, winRate: 0.9, avgWinPct: 0.1, avgLossPct: 0.01 } }
   }), aiHandler);
   const data = await response.json();
   assert.equal(response.status, 200);
@@ -105,4 +105,21 @@ test("six-role pipeline calls four AI roles and keeps execution disabled", async
   assert.equal(data.outputs.TAKER.autoSubmit, false);
   assert.equal(data.safety.autoExecution, false);
   assert.equal(data.safety.paperOrderCreated, false);
+});
+
+test("TAKER blocks WATCH and REJECT decisions even if a Kelly size exists", async () => {
+  const { computeFractionalKelly, buildTakerPlan } = await modulePromise;
+  const kelly = computeFractionalKelly({
+    strategyPass: true, oosPass: true, sampleCount: 240, oosTrades: 45,
+    winRate: 0.58, avgWinPct: 0.025, avgLossPct: 0.02
+  });
+  const plan = buildTakerPlan({ symbol: "BTCUSDT", side: "BUY", verdict: "WATCH" }, kelly, {
+    structuredMarket: {
+      selectedSymbol: "BTCUSDT",
+      account: { equity: 10000 },
+      orderBook: { capturedAt: Date.now(), asks: [[100000, 2]], bids: [[99900, 2]] }
+    }
+  });
+  assert.equal(plan.status, "BLOCKED");
+  assert.equal(plan.autoSubmit, false);
 });
