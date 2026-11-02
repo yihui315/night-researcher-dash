@@ -20,7 +20,7 @@
     <div class="top-status">
       <span class="mode-pill"><i></i> PAPER ONLY · 模拟账户</span>
       <span id="connectionStatus" class="connection"><i></i> 正在连接行情</span>
-      <span id="paperLedgerStatus" class="small-pill ai-status" title="服务端快照备份状态">账本初始化中</span>
+      <span id="paperLedgerStatus" class="small-pill ai-status" title="服务端权威账户与事件账本状态">权威账本初始化中</span>
       <span id="lastUpdate" class="last-update">—</span>
       <a class="ghost-btn ai-nav-link" href="ai-settings.html">AI API 设置</a>
       <button id="exportTrades" class="ghost-btn">导出成交 CSV</button>
@@ -87,10 +87,10 @@
             <button id="aiClearKey" class="ghost-btn">清空当前密钥</button>
           </div>
           <div class="ai-actions">
-            <button id="paperSelfTestBtn" class="ghost-btn">运行当前盘口模拟自检</button>
+            <button id="paperSelfTestBtn" class="ghost-btn">运行客户端盘口参考自检</button>
             <span id="paperSelfTestStatus" class="small-pill ai-status">未运行</span>
           </div>
-          <div id="paperSelfTestResult" class="ai-selftest-result">使用当前真实公开盘口，在独立临时账户中完成一笔小额买入/卖出往返；不影响主模拟账户，不写入本地存储。</div>
+          <div id="paperSelfTestResult" class="ai-selftest-result">仅验证浏览器参考撮合算法的盘口买卖往返；不写入服务端账户，不代表服务端执行验收。</div>
           <label class="field-label" for="aiPrompt">研究任务</label>
           <textarea id="aiPrompt" class="field-control ai-prompt" rows="4">分析当前市场结构和模拟账户。提出 2–3 个可证伪的策略假设，列出入场触发、退出/失效条件、交易成本、风险预算和需要补充的数据。不要给出真实下单指令。</textarea>
           <div class="ai-actions">
@@ -191,7 +191,7 @@
           <div class="quick-qty"><button data-pct="0.25">25%</button><button data-pct="0.5">50%</button><button data-pct="0.75">75%</button><button data-pct="1">100%</button></div>
           <div class="estimate-box"><div><span>参考价格</span><b id="estimatePrice">—</b></div><div><span>预计金额</span><b id="estimateNotional">—</b></div><div><span>预计手续费 (0.1%)</span><b id="estimateFee">—</b></div></div>
           <button id="submitOrder" class="submit-order buy">模拟买入</button>
-          <div id="orderFeedback" class="feedback" role="status">等待盘口数据。下单只会改变本地模拟账户。</div>
+          <div id="orderFeedback" class="feedback" role="status">等待盘口数据。订单由服务端重新读取最新盘口、执行风险校验并写入权威模拟账本；服务端不可用时禁止下单。</div>
           <div class="ticket-disclaimer">限价单不模拟真实队列优先级；市场单按可见盘口深度估算成交。手续费按 0.1% 计，滑点由盘口价差及深度体现。</div>
         </article>
 
@@ -237,17 +237,17 @@
         <div><div class="panel-kicker">AUDIT & RESEARCH LINEAGE</div><h2>AI 研究与模拟交易审计</h2></div>
         <div class="audit-toolbar">
           <span class="small-pill">SERVER JOURNAL</span>
-          <button id="refreshAuditBtn" class="ghost-btn">刷新记录</button>
+          <button id="refreshAuditBtn" class="ghost-btn">刷新记录</button>\n          <button id="replayPaperBtn" class="ghost-btn">校验并回放</button>
         </div>
       </div>
       <div id="auditEmpty" class="audit-empty">正在初始化服务端审计…</div>
       <div id="auditEvents" class="audit-events"></div>
-      <div class="ticket-disclaimer">Agent 运行事件由 Pages Function 服务端写入；账户快照由浏览器模拟引擎生成，仅作审计与恢复，不是权威成交账本。当前未配置 D1 时会明确显示本地模式。</div>
+      <div class="ticket-disclaimer">研究事件、订单、成交、风险拒绝和账户状态均由 Pages Function 服务端写入 D1 SQLite 账本；浏览器不能提交账户状态、盘口或成交结果。D1 未配置时系统只读并禁止模拟下单。</div>
     </article>
 
     <footer class="page-footer">
       <span>NIGHT RESEARCHER · PAPER TRADING V1</span>
-      <span>行情来源 Binance Public API · 本地缓存 + 可选 D1 服务端快照备份（非权威执行账本）</span>
+      <span>行情来源 Binance Public API · 服务端权威 Paper Engine + D1 SQLite 事件账本 · Live Trading 关闭</span>
       <a href="index.html">返回研究仪表盘</a>
     </footer>
   </main>
