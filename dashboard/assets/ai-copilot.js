@@ -5,6 +5,18 @@
   const conversation = [];
   let busy = false;
 
+  async function ensurePaperAuditSession() {
+    try {
+      await fetch("/api/paper/session", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+        cache: "no-store"
+      });
+    } catch (_) {}
+  }
+
   function setStatus(text, kind) {
     const el = $("aiStatus");
     if (!el) return;
@@ -177,6 +189,7 @@
     $("aiTeamStatus").className = "small-pill ai-status pending";
     $("aiTeamOutput").textContent = "正在依次运行 SPOTTER → PRIOR → EDGE → KELLY → TAKER → CLOSER。";
     try {
+      await ensurePaperAuditSession();
       const response = await fetch("/api/agents/research", {
         method: "POST",
         headers: { "content-type": "application/json" },
