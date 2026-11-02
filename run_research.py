@@ -20,7 +20,7 @@ import json
 from backtest_engine import (
     fetch_klines, fetch_fng, fetch_stablecoin_supply, Context,
     simulate, evaluate_gates, build_card, build_morning_report, bj_time,
-    buy_and_hold_return, rolling_oos, grid_search, summarize_grid,
+    buy_and_hold_return, walk_forward_oos, grid_search, summarize_grid,
 )
 from strategies import STRATEGIES
 from brc20_runes_monitor import analyze_brc20_runes
@@ -240,25 +240,55 @@ def _build_cross_validation(brc20_ctx, now_ms, start_ms, oos_ms, fng_pts):
     L = ["\n## 六、跨资产 / 周期交叉验证（压制单资产过拟合嫌疑）\n"]
     dayms = 86400_000
     start_d = bj_time(start_ms)
-    cv = {"grainFlip": [], "vintage": []}
+    cv = {"grainFlip": [], "vintage": [], "walkForward": []}
+    param_grids = {
+        "FNG_EMA_MR": {
+            "fng_extreme": [20, 25, 30],
+            "rsi_entry": [30, 35, 40],
+            "max_hold": [10, 20],
+        },
+        "BRC20_RSI_MR": {
+            "oversold": [22, 26, 30, 35, 40],
+            "overbought": [60, 65, 70, 75, 80],
+        },
+    }
 
     for label, ctx in brc20_ctx.items():
-        L.append(f"\n### 6.1 {label} · 滚动样本外（walk-forward，每 fold 90 天，不重叠）\n")
-        L.append(f"- 回测窗口：{start_d} 起；共 {FOLDS} 个样本外 vintage（自今向前推）。\n")
-        L.append("| 策略 | Vintage(结束日) | 交易数 | OOS净收益 | 胜率 |")
-        L.append("|---|---|---|---|---|")
+        L.append(f"\n### 6.1 {label} · 严格 Walk-forward（每个 fold 先训练，再独立验证 90 天）\n")
+        L.append(f"- 回测窗口：{start_d} 起；共 {FOLDS} 个不重叠验证窗口。每个 fold 只使用验证窗口之前的数据选择参数。\n")
+        L.append("| 策略 | 训练交易数 | 训练期净收益 | 验证交易数 | OOS 净收益 | 胜率 | 验证回撤 | 状态 |")
+        L.append("|---|---:|---:|---:|---:|---:|---:|---|")
         vintage_by_strat = {}
+        walkforward_by_strat = {}
         for key, name in [("FNG_EMA_MR", "FNG_EMA_MR(低频)"), ("BRC20_RSI_MR", "BRC20_RSI_MR(高频)")]:
-            folds = rolling_oos(STRATEGIES[key], {}, ctx, folds=FOLDS, oos_days=OOS_DAYS)
+            folds = walk_forward_oos(
+                STRATEGIES[key],
+                ctx,
+                param_grids[key],
+                folds=FOLDS,
+                oos_days=OOS_DAYS,
+                min_train_trades=10,
+            )
             vintage_by_strat[key] = folds
+            walkforward_by_strat[key] = folds
             for fd in folds:
-                end_d = bj_time(fd["end_ms"])
-                wr = "-" if fd["win_rate"] is None else f"{fd['win_rate']*100:.1f}%"
-                L.append(f"| {name} | {end_d} | {fd['n']} | {_fmt_pct(fd['net'])} | {wr} |")
+                train_net = "—" if fd["train_net"] is None else _fmt_pct(fd["train_net"])
+                oos_net = _fmt_pct(fd["net"])
+                wr = "—" if fd["win_rate"] is None else f"{fd['win_rate']*100:.1f}%"
+                mdd = "—" if fd["max_drawdown"] is None else f"{fd['max_drawdown']*100:.1f}%"
+                status = "训练期无正 edge" if fd["status"] == "NO_TRAIN_EDGE" else ("验证无交易" if fd["status"] == "NO_OOS_TRADES" else "已验证")
+                L.append(f"| {name} | {fd['train_n']} | {train_net} | {fd['n']} | {oos_net} | {wr} | {mdd} | {status} |")
         L.append("")
-        L.append(f"- **解读**：FNG_EMA_MR 各 vintage 仅 1 笔交易 → **OOS 饥饿（验证不可信）**；"
-                 f"BRC20_RSI_MR 因频率更高，各 vintage 交易数显著增多，可初步判断策略稳定性。"
-                 f"若多 vintage 净收益方向一致（同正/同负），则过拟合嫌疑下降；若正负交替，则仍为噪音。\n")
+        for key, name in [("FNG_EMA_MR", "FNG_EMA_MR"), ("BRC20_RSI_MR", "BRC20_RSI_MR")]:
+            rows = walkforward_by_strat[key]
+            valid = [fd for fd in rows if fd["status"] == "VALIDATED" and fd["net"] is not None]
+            positive = sum(1 for fd in valid if fd["net"] > 0)
+            L.append(f"- **{name}**：{len(valid)}/{len(rows)} 个 fold 产生独立 OOS 成交；其中 {positive} 个 fold 净收益为正。")
+        L.append("- **解释边界**：这是训练窗口内参数选择 + 后续独立窗口验证；若训练期无正 edge，该 fold 不会强行选参数。不同 fold 的策略参数可能不同，结果不能与固定参数回测混为一谈。\n")
+        cv["walkForward"].append({
+            "sym": label.split("(")[0],
+            "strategies": walkforward_by_strat,
+        })
 
         # 多周期：4h vs 1d（仅 BRC20_RSI_MR）
         L.append(f"### 6.2 {label} · 多周期对比（BRC20_RSI_MR，样本内净收益）\n")
