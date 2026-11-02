@@ -232,6 +232,19 @@
       </aside>
     </section>
 
+    <article class="panel audit-panel">
+      <div class="panel-head">
+        <div><div class="panel-kicker">AUDIT & RESEARCH LINEAGE</div><h2>AI 研究与模拟交易审计</h2></div>
+        <div class="audit-toolbar">
+          <span class="small-pill">SERVER JOURNAL</span>
+          <button id="refreshAuditBtn" class="ghost-btn">刷新记录</button>
+        </div>
+      </div>
+      <div id="auditEmpty" class="audit-empty">正在初始化服务端审计…</div>
+      <div id="auditEvents" class="audit-events"></div>
+      <div class="ticket-disclaimer">Agent 运行事件由 Pages Function 服务端写入；账户快照由浏览器模拟引擎生成，仅作审计与恢复，不是权威成交账本。当前未配置 D1 时会明确显示本地模式。</div>
+    </article>
+
     <footer class="page-footer">
       <span>NIGHT RESEARCHER · PAPER TRADING V1</span>
       <span>行情来源 Binance Public API · 本地缓存 + 可选 D1 服务端快照备份（非权威执行账本）</span>
