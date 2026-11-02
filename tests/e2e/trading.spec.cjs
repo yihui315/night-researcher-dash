@@ -90,6 +90,13 @@ test.beforeEach(async ({ page }) => {
       });
       paperEvents.push({
         seq: paperEvents.length + 1,
+        eventId: "risk.decision:" + payload.runId,
+        eventType: "risk.decision",
+        payload: { runId: payload.runId, decision: "BLOCKED", kellyStatus: "BLOCKED", allocationPct: 0, autoSubmit: false },
+        createdAt: completedAt
+      });
+      paperEvents.push({
+        seq: paperEvents.length + 1,
         eventId: "agent.run.completed:" + payload.runId,
         eventType: "agent.run.completed",
         payload: { runId: payload.runId, snapshotHash: "a".repeat(64), outputs, usage: { total_tokens: 60 } },
@@ -209,6 +216,7 @@ test("AI Provider Center is visible and the six-agent flow never persists keys",
   await expect(page.locator("#aiOutput")).toContainText("SPOTTER");
   await expect(page.locator("#aiOutput")).toContainText("KELLY");
   await expect(page.locator("#auditEvents")).toContainText("六角色研究 · 已完成");
+  await expect(page.locator("#auditEvents")).toContainText("风险决策 · BLOCKED");
   const events = paperLedgerByPage.get(page);
   await expect.poll(() => events.some(event => event.eventType === "agent.run.started")).toBeTruthy();
   await expect.poll(() => events.some(event => event.eventType === "agent.run.completed")).toBeTruthy();
