@@ -138,7 +138,7 @@
           const p = event.payload || {};
           if (event.eventType === "paper.account.snapshot") {
             const account = p.account || {};
-            return { title: "模拟账户快照", meta: [p.reason || "状态更新", Number.isFinite(Number(account.cash)) ? "现金 " + money(account.cash) : null, Array.isArray(account.trades) ? account.trades.length + " 笔成交" : null].filter(Boolean).join(" · "), id: event.eventId, status: "已备份", time: event.createdAt };
+            return { title: "模拟账户快照", meta: [p.reason || "状态更新", Number.isFinite(Number(account.cash)) ? "现金 $" + Number(account.cash).toFixed(2) : null, Array.isArray(account.trades) ? account.trades.length + " 笔成交" : null].filter(Boolean).join(" · "), id: event.eventId, status: "已备份", time: event.createdAt };
           }
           return { title: String(event.eventType || "事件"), meta: "服务端审计事件", id: event.eventId, status: "已记录", time: event.createdAt };
         })
