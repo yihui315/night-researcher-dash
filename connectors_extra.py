@@ -286,7 +286,7 @@ def fetch_crc20_market_snapshot(btc_usdt=None, history_limit=100):
     stats_height = token.get("height")
     height_consistent = (
         isinstance(status_height, int) and isinstance(stats_height, int)
-        and stats_height <= status_height
+        and stats_height == status_height
     )
 
     return {
