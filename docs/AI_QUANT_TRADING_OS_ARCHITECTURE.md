@@ -126,11 +126,12 @@ P1 数据接入顺序：
 - 指标：胜率及置信区间、Expectancy、Profit Factor、Sharpe、Sortino、Max Drawdown、OOS、滑点敏感性、市场状态分层。
 
 现状审计：
-- 回测引擎已有事件驱动下一根 K 线开盘成交、OHLC 止损、交易成本、胜率、平均盈亏、Profit Factor、Expectancy、Payoff Ratio、Max Drawdown。
+- 回测引擎已有事件驱动下一根 K 线开盘成交、OHLC 止损、逐 K 线浮动盯市回撤、交易成本、胜率及 Wilson 区间、平均盈亏、Profit Factor、Expectancy、Payoff Ratio、每笔 Sharpe/Sortino、Monte Carlo bootstrap、滑点压力和 Max Drawdown。
 - 已有 730 天窗口、90 天 OOS、参数网格和多个 vintage 的研究框架。
 - 本轮已将 `rolling_oos` 替换为严格 `walk_forward_oos`：每个 fold 只用验证开始前的数据选择参数，再用新策略实例在独立 90 天窗口从空仓验证；训练与验证上下文均按时间截断。
 - 新增 CRC20 LEAF 连接器：status、stats、history；marketplace sale 与 pool swap 分开；sat/LEAF → USD 仅作为 BTC/USDT 参考价派生值；best bid/ask 与 6h VWAP 未从不支持的 API 臆测。
-- Sharpe/Sortino、Monte Carlo、交易级滑点/冲击回放尚未完成；walk-forward 也需要真实数据运行后的结果审查。
+- 本轮已补胜率 95% Wilson 区间、每笔 Sharpe/Sortino（明确不年化）、交易收益 bootstrap Monte Carlo（1000 次，明确不模拟序列相关/盘口路径）和额外每边 0/5/10/20/50 bps 滑点压力。参数网格/敏感性内部跳过 Monte Carlo，避免计算膨胀。
+- 仍未完成真实订单簿逐笔回放、动态冲击模型、按日收益年化 Sharpe/Sortino 和 Monte Carlo 序列相关性/区块 bootstrap；当前结果是交易级近似。
 - 当前策略报告中的策略均未通过全部门禁，不允许晋级。
 
 Paper Engine 当前约束：
@@ -211,7 +212,7 @@ Live Trading：
 
 | 阶段 | 验收 |
 |---|---|
-| P0 基线/回测可信 | 严格 Walk-forward 已实现；补 Sharpe/Sortino/Monte Carlo；持续验证无前视 |
+| P0 基线/回测可信 | 严格 Walk-forward、基础风险质量指标、交易收益 Monte Carlo、滑点压力已实现；继续补逐笔盘口回放与区块 bootstrap |
 | P1 数据中心 | CEX depth sequence；Funding/OI/liquidations；RUNES/CRC20 代币级市场数据 |
 | P2 Paper Trading | 交易规则过滤器、部分成交、服务端 ledger、回放与幂等 |
 | P3 JEV 集成 | JEV React 19 页面、Provider Center/DPAPI、4779 API、WebSocket event bus |
