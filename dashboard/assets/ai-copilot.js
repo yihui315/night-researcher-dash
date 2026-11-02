@@ -72,6 +72,8 @@
         bids: tableRows("#bidRows .book-row", 5),
         spread: $("spreadValue")?.textContent || "未知"
       },
+      structuredMarket: window.NRTradingGetSnapshot ? window.NRTradingGetSnapshot() : null,
+      strategyMetrics: null,
       safety: "仅模拟账户；无真实交易密钥、无钱包、无真实订单权限"
     };
   }
@@ -159,6 +161,55 @@
     }
   }
 
+  async function runTeam() {
+    if (busy) return;
+    const config = currentConfig();
+    if (!config.apiKey) { setStatus("请先输入 API Key", "error"); return; }
+    if (config.provider === "qwen" && !config.workspaceId) { setStatus("请填写 Workspace ID", "error"); return; }
+    busy = true;
+    $("aiTeamRun").disabled = true;
+    $("aiTest").disabled = true;
+    $("aiRun").disabled = true;
+    $("aiTeamStatus").textContent = "六角色运行中…";
+    $("aiTeamStatus").className = "small-pill ai-status pending";
+    $("aiTeamOutput").textContent = "正在依次运行 SPOTTER → PRIOR → EDGE → KELLY → TAKER → CLOSER。";
+    try {
+      const response = await fetch("/api/agents/research", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          provider: config.provider, model: config.model, apiKey: config.apiKey,
+          region: config.region, workspaceId: config.workspaceId, snapshot: marketSnapshot()
+        })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        $("aiTeamStatus").textContent = "流程未完成";
+        $("aiTeamStatus").className = "small-pill ai-status error";
+        appendMessage("assistant", "六 Agent 流程中止：" + (data.error || "请求失败") + (data.agent ? " · 阻塞角色 " + data.agent : ""));
+        if (data.partial) appendMessage("assistant", "已完成的角色结果：\n" + JSON.stringify(data.partial, null, 2));
+        return;
+      }
+      const order = ["SPOTTER", "PRIOR", "EDGE", "KELLY", "TAKER", "CLOSER"];
+      order.forEach(role => {
+        if (data.outputs && data.outputs[role]) appendMessage("assistant", role + " · " + (data.outputs[role].title || "研究角色") + "\n" + JSON.stringify(data.outputs[role], null, 2));
+      });
+      $("aiTeamStatus").textContent = "流程完成 · 研究模式";
+      $("aiTeamStatus").className = "small-pill ai-status success";
+      appendMessage("assistant", "安全闸门：" + (data.safety && data.safety.note || "没有自动执行权限") + "\nToken 用量：" + JSON.stringify(data.usage || {}));
+    } catch (error) {
+      $("aiTeamStatus").textContent = "连接失败";
+      $("aiTeamStatus").className = "small-pill ai-status error";
+      appendMessage("assistant", "六 Agent 请求未完成：" + (error.message || "未知错误"));
+    } finally {
+      busy = false;
+      $("aiTeamRun").disabled = false;
+      $("aiTest").disabled = false;
+      $("aiRun").disabled = false;
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     if (!$("aiProvider")) return;
     $("aiProvider").addEventListener("change", providerFields);
@@ -186,6 +237,7 @@
     });
     $("aiTest").addEventListener("click", () => run("test"));
     $("aiRun").addEventListener("click", () => run("analysis"));
+    $("aiTeamRun").addEventListener("click", runTeam);
     $("aiClearKey").addEventListener("click", () => {
       const provider = $("aiProvider").value;
       if (provider === "minimax") $("minimaxApiKey").value = "";
