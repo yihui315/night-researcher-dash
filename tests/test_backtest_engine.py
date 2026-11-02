@@ -1,6 +1,6 @@
 import unittest
 
-from backtest_engine import simulate
+from backtest_engine import Context, simulate, walk_forward_oos
 
 
 class FakeContext:
@@ -58,6 +58,61 @@ class BacktestExecutionTests(unittest.TestCase):
         ctx = FakeContext(self.bars([(99, 101, 98, 100), (110, 115, 105, 112), (120, 122, 118, 121)]))
         simulate(strategy, ctx, 99)
         self.assertEqual(strategy.position, "FLAT")
+
+
+class TrainableTrendStrategy:
+    def __init__(self, hold=1, **kwargs):
+        self.hold = int(hold)
+        self.params = {"hold": self.hold}
+        self.stop_pct = 0
+        self.position = "FLAT"
+        self.entry_i = 0
+        self.entry_price = 0.0
+
+    def step(self, i, ctx):
+        if self.position == "FLAT":
+            if i % 20 == 0:
+                self.position = "LONG"
+                self.entry_i = i
+                self.entry_price = ctx.closes[i]
+                return "LONG"
+            return "HOLD"
+        if i - self.entry_i >= self.hold:
+            self.position = "FLAT"
+            return "FLAT"
+        return "HOLD"
+
+
+class WalkForwardTests(unittest.TestCase):
+    def test_walk_forward_selects_params_on_past_only_then_runs_isolated_oos(self):
+        bars = []
+        for i in range(1500):
+            close = 100.0 + i * 0.1
+            bars.append({
+                "t": i * 4 * 60 * 60 * 1000,
+                "o": close - 0.05,
+                "h": close + 0.1,
+                "l": close - 0.1,
+                "c": close,
+                "v": 100.0,
+            })
+        ctx = Context(bars, [])
+        folds = walk_forward_oos(
+            TrainableTrendStrategy,
+            ctx,
+            {"hold": [1, 5]},
+            folds=3,
+            oos_days=10,
+            min_train_trades=10,
+        )
+        self.assertEqual(len(folds), 3)
+        for fold in folds:
+            self.assertEqual(fold["status"], "VALIDATED")
+            self.assertEqual(fold["selected_params"]["hold"], 5)
+            self.assertGreaterEqual(fold["train_n"], 10)
+            self.assertGreater(fold["n"], 0)
+            self.assertGreater(fold["net"], 0)
+            self.assertLess(fold["start_ms"], fold["end_ms"])
 
 
 if __name__ == "__main__":
