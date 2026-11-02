@@ -22,6 +22,8 @@ import json
 import re
 import time
 import bisect
+import math
+import random
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone, timedelta
@@ -568,6 +570,8 @@ def _mk_trade(direction, ep, xp, ei, xi, ret, ctx, forced):
         "entry_i": ei,
         "exit_i": xi,
         "ret": ret,
+        "gross_ret": ret + 2 * SIDE_COST,
+        "round_trip_cost": 2 * SIDE_COST,
         "forced": forced,
         "regime": ctx.regime_at(ei),
         "oos": xi >= 0 and False,  # 占位，下面统一标
