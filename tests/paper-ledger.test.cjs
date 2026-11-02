@@ -123,6 +123,13 @@ test("trusted agent audit events are server-written and cannot be forged through
   assert.equal(trusted, true);
   assert.equal(e.PAPER_DB.events.length, 1);
   assert.equal(e.PAPER_DB.events[0].event_type, "agent.run.started");
+  const risk = await appendTrustedEvent(
+    request("https://nr.example/api/agents/research", "POST", cookie, { placeholder: true }),
+    e,
+    { eventId: "risk.decision:12345678", eventType: "risk.decision", payload: { runId: "12345678", decision: "BLOCKED" } }
+  );
+  assert.equal(risk, true);
+  assert.equal(e.PAPER_DB.events.length, 2);
 
   const forged = await handlePaperLedger(
     request("https://nr.example/api/paper/ledger", "POST", cookie, {
