@@ -187,6 +187,7 @@
       if (!response.ok || !data.ok) {
         $("aiTeamStatus").textContent = "流程未完成";
         $("aiTeamStatus").className = "small-pill ai-status error";
+        $("aiTeamOutput").textContent = "流程中止，未生成订单。";
         appendMessage("assistant", "六 Agent 流程中止：" + (data.error || "请求失败") + (data.agent ? " · 阻塞角色 " + data.agent : ""));
         if (data.partial) appendMessage("assistant", "已完成的角色结果：\n" + JSON.stringify(data.partial, null, 2));
         return;
@@ -197,10 +198,12 @@
       });
       $("aiTeamStatus").textContent = "流程完成 · 研究模式";
       $("aiTeamStatus").className = "small-pill ai-status success";
+      $("aiTeamOutput").textContent = "六角色流程完成；逐角色结构化结果已写入下方研究记录。TAKER 未自动创建订单。";
       appendMessage("assistant", "安全闸门：" + (data.safety && data.safety.note || "没有自动执行权限") + "\nToken 用量：" + JSON.stringify(data.usage || {}));
     } catch (error) {
       $("aiTeamStatus").textContent = "连接失败";
       $("aiTeamStatus").className = "small-pill ai-status error";
+      $("aiTeamOutput").textContent = "连接失败，未生成订单。";
       appendMessage("assistant", "六 Agent 请求未完成：" + (error.message || "未知错误"));
     } finally {
       busy = false;
