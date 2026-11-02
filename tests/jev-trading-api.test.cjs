@@ -27,7 +27,7 @@ test("JEV adapter uses same-origin routes and never sends provider credentials",
     }
   });
   const result = await api.createResearchRun({
-    providerId: "minimax-m3",
+    providerId: "minimax",
     modelOverride: "MiniMax-M3",
     symbols: ["BTCUSDT", "ORDIUSDT"],
     snapshotId: "snapshot-1",
@@ -39,7 +39,7 @@ test("JEV adapter uses same-origin routes and never sends provider credentials",
   assert.equal(calls[0].init.credentials, "same-origin");
   const body = JSON.parse(calls[0].init.body);
   assert.deepEqual(body.symbols, ["BTCUSDT", "ORDIUSDT"]);
-  assert.equal(body.providerId, "minimax-m3");
+  assert.equal(body.providerId, "minimax");
   assert.equal("apiKey" in body, false);
   assert.equal("apiKey" in calls[0].init.headers, false);
 });
@@ -95,4 +95,39 @@ test("JEV adapter normalizes API errors without exposing request credentials", a
     assert.match(error.message, /risk gate rejected/);
     return true;
   });
+});
+
+
+test("JEV adapter reads ProviderRegistry and can probe a configured provider without credentials", async () => {
+  const calls = [];
+  const api = createTradingApi({
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      if (url === "/api/v1/providers") {
+        return new Response(JSON.stringify({ providers: [
+          { id: "typesafe_jev", display_state: "CONNECTED", model: "jev-latest" },
+          { id: "minimax", display_state: "CONNECTED", model: "MiniMax-M3" },
+          { id: "qwen_coding_plan_cn", display_state: "AUTH_MISSING" }
+        ] }), { status: 200 });
+      }
+      if (url.endsWith("/minimax/probe")) {
+        return new Response(JSON.stringify({ ok: true, state: "READY", model: "MiniMax-M3" }), { status: 200 });
+      }
+      if (url.endsWith("/minimax/models")) {
+        return new Response(JSON.stringify({ models: ["MiniMax-M3"] }), { status: 200 });
+      }
+      throw new Error("Unexpected JEV route " + url);
+    }
+  });
+  const providers = await api.listProviders();
+  assert.equal(providers.providers[1].id, "minimax");
+  const probe = await api.probeProvider("minimax");
+  assert.equal(probe.state, "READY");
+  const models = await api.listProviderModels("minimax");
+  assert.deepEqual(models.models, ["MiniMax-M3"]);
+  assert.equal(calls[1].url, "/api/v1/providers/minimax/probe");
+  assert.equal(calls[1].init.method, "POST");
+  assert.equal("apiKey" in calls[1].init.headers, false);
+  assert.equal("apiKey" in JSON.parse(calls[1].init.body), false);
+  assert.throws(() => api.probeProvider(""), /providerId is required/);
 });
