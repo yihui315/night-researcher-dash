@@ -7,7 +7,7 @@
     { symbol: "ORDIUSDT", label: "ORDI" }, { symbol: "1000SATSUSDT", label: "1000SATS" }
   ];
   const INTERVALS = { "1m": 60, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 };
-  const state = { symbol: "BTCUSDT", interval: "4h", side: "BUY", tickers: {}, book: { bids: [], asks: [] }, klines: [], trades: [], socket: null, socketReady: false, reconnectTimer: null, chart: null, candleSeries: null, lastBar: null, account: window.NRPaper.loadAccount(), marks: {}, restTimer: null };
+  const state = { symbol: "BTCUSDT", interval: "4h", side: "BUY", tickers: {}, book: { bids: [], asks: [] }, klines: [], trades: [], socket: null, socketReady: false, reconnectTimer: null, socketGeneration: 0, chart: null, candleSeries: null, lastBar: null, account: window.NRPaper.loadAccount(), marks: {}, restTimer: null };
   const $ = id => document.getElementById(id);
   const money = n => Number(n || 0).toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const num = (n, d) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: d == null ? 6 : d });
@@ -313,12 +313,18 @@
   window.NRTradingSelectSymbol = selectSymbol;
   function connectSocket() {
     if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
-    const s = state.symbol.toLowerCase();
+    const activeSymbol = state.symbol;
+    const generation = ++state.socketGeneration;
+    const s = activeSymbol.toLowerCase();
     const streams = [s + "@ticker", s + "@depth20@100ms", s + "@trade"].join("/");
     try {
       const ws = new WebSocket("wss://stream.binance.com:9443/stream?streams=" + streams);
       state.socket = ws; state.socketReady = false;
-      ws.onopen = () => { state.socketReady = true; setConnection("WebSocket 实时行情", false); };
+      ws.onopen = () => {
+        if (state.socket !== ws || state.socketGeneration !== generation) return;
+        state.socketReady = true;
+        setConnection("WebSocket 实时行情", false);
+      };
       ws.onmessage = event => {
         try {
           const d = JSON.parse(event.data).data || {};
@@ -335,8 +341,20 @@
           setText("lastUpdate", "更新 " + new Date().toLocaleTimeString("zh-CN", { hour12: false }));
         } catch (_) {}
       };
-      ws.onerror = () => setConnection("WebSocket 异常 · REST 备用", true);
-      ws.onclose = () => { state.socketReady = false; setConnection("REST 备用 · 等待重连", true); state.reconnectTimer = setTimeout(() => { if (state.symbol === symbol) connectSocket(); }, 4000); };
+      ws.onerror = () => {
+        if (state.socket === ws && state.socketGeneration === generation) {
+          setConnection("WebSocket 异常 · REST 备用", true);
+        }
+      };
+      ws.onclose = () => {
+        if (state.socket === ws) state.socket = null;
+        if (state.socketGeneration !== generation || state.symbol !== activeSymbol) return;
+        state.socketReady = false;
+        setConnection("REST 备用 · 等待重连", true);
+        state.reconnectTimer = setTimeout(() => {
+          if (state.symbol === activeSymbol && state.socketGeneration === generation) connectSocket();
+        }, 4000);
+      };
     } catch (_) { setConnection("REST 备用", true); }
   }
   async function restFallback() {
