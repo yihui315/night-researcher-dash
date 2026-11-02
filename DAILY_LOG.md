@@ -57,3 +57,59 @@
 https://github.com/yihui315/night-researcher-dash/compare/feat/p2-server-authoritative-paper...feat/p2-fixedpoint
 ```
 打开后 GitHub 显示 "Create pull request" 按钮（base=分支A，head=fixedpoint，不碰 main）。
+
+---
+
+## 2026-11-03（GMT+8）— Sprint 002 启动：T02 套件 + T03/T04/T05 派遣
+
+### 1. 今日完成任务
+- **T01 复验（B01/B02/B03/B04 复核）**
+  - 交叉核对远程：`feat/p2-fixedpoint` 领先分支 A `feat/p2-server-authoritative-paper` **4 个提交、7 个文件**，与主理人报告 №002 一致。
+  - **B03/B04 重跑全部 81 项非 e2e 测试**：`node --test` 81 passed / 0 failed（完整日志 `reports/TEST_LOG_81_2026-11-03.md`）。
+  - **B02 迁移 0003 独立审查**：`reports/MIGRATION_0003_REVIEW.md` —— REAL→INTEGER 精度(半进位，与 decimal.mjs 一致)、旧数据转换(且纠正历史浮点漂移)、NULL 安全、重复执行风险(⚠️ 裸 execute 二次报错，缓解=wrangler tracked migrations apply 或幂等守卫)、**历史事件回放兼容性(✅ 不受影响，因 state_json 未被触碰，引擎以 state_json 重算哈希)**。覆盖完整性：orders+fills 全金额列；accounts 无独立金额列(金额在 state_json)，无需迁移。
+- **T02 D1 验收套件（A5/A6，B05/B06 准备）**
+  - `wrangler.toml`：独立测试库 `paper_test`（DB 绑定），隔离生产。
+  - `scripts/d1-migrate.mjs`：幂等迁移运行器（wrangler tracked migrations apply，天然幂等）。
+  - `scripts/d1-verify.mjs`：真实 D1 验收（batch 回滚 / 幂等键 / 并发乐观锁 / 账户隔离 / 事件回放哈希链）；**未授权时输出 `BLOCKED: AUTH REQUIRED` 并退出 0，不伪造结果**。
+  - 四份报告：`D1_DEPLOYMENT.md` / `D1_TRANSACTION_TEST.md` / `D1_CONCURRENCY_TEST.md` / `D1_RECOVERY_TEST.md`（验收计划 + 标准 + 当前状态）。
+  - `package.json` 新增 `d1:migrate` / `d1:verify` 脚本。
+- **T03/T04/T05 并行派遣（独立分支子 Agent）**
+  - 前端子 Agent：`feat/jev-trading-workbench`（jev 仓）—— 六交易页 + Paper API 客户端(TS) + Mock Contract + 路由集成(复用自定义 hash 路由/navigation.ts/authorizedFetch) + Vitest 测试。受 GIT 安全约束，不碰用户未提交文件、不直推。
+  - AI 子 Agent：`feat/ai-six-roles`（night_researcher 仓）—— 复用 `agent-orchestrator.mjs`/`ai-core.mjs` 建 SPOTTER→…→CLOSER + 统一 JSON Schema + 门禁(EDGE 无证据不晋级/KELLY 样本不足仓位为零/OOS 未过禁晋级/TAKER 仅提案不改性账户/CLOSER 记录退出理由) + 决策链 ID + 测试。
+  - 研究子 Agent：`feat/research-data-pipeline`（night_researcher 仓）—— BTCUSDT/ETHUSDT/ORDIUSDT 行情采集(可插拔 Mock 源) + 快照 id/时间戳 + 策略版本冻结 + OOS 隔离 + 每日绩效(胜率/盈亏比/净收益/费/滑点/最大回撤/Sharpe/风险拒绝/停用) + 异常检测 + 样本批次 + 报告。
+
+### 2. 修改文件与提交 SHA（feat/p2-fixedpoint）
+- `7df882e` docs(t00): 统一项目基线文档五件套 + 刷新状态/看板 —— **待推送（GitHub 502）**
+- `426328d` docs+tooling(t02): D1 部署与验收套件 + 迁移审查（B02）—— **待推送（GitHub 502）**
+- 新增文件：`wrangler.toml`、`scripts/d1-migrate.mjs`、`scripts/d1-verify.mjs`、`reports/MIGRATION_0003_REVIEW.md`、`reports/D1_{DEPLOYMENT,TRANSACTION,CONCURRENCY,RECOVERY}_TEST.md`、`reports/TEST_LOG_81_2026-11-03.md`
+
+### 3. 自动化测试真实结果
+- `node --test` 全量非 e2e：**81 passed / 0 failed**（2026-11-03 当前提交重跑，非复用旧报告）。
+- `node scripts/d1-verify.mjs`：未授权 → `BLOCKED: AUTH REQUIRED`，退出 0（已验证优雅降级，无伪造）。
+
+### 4. 未完成任务及原因
+- **PR 仍待主理人创建**：本机无 `gh`/Token，无法自动建；Web 链接已就绪。
+- **T02 真实 D1 运行**：待 Cloudflare 测试库授权（仅测试库权限即可）。
+- **T03/T04/T05**：子 Agent 进行中，尚未返回提交与测试证据。
+- **`7df882e`/`426328d` 待推送**：GitHub 出网 502，恢复即补推。
+
+### 5. 阻塞与需要的授权
+- Cloudflare 测试环境授权（token 由 WorkBuddy 安全读取，不写 Git）—— 用于 T02 真实 D1 部署/并发/幂等/回滚/恢复验收。
+- 主理人点开 PR 创建链接完成 T01 收口（或提供 gh/Token 由我代建）。
+
+### 6. 明日执行任务
+- 网络恢复后补推 `7df882e` + `426328d`。
+- 跟进 T03/T04/T05 子 Agent 交付，验收其提交 SHA 与测试后合入。
+- 若获 Cloudflare 授权：运行 `node scripts/d1-verify.mjs` 真实 D1 验收并填写结果。
+- 按 Sprint 002 五日节点推进。
+
+### 7. 整体达成度与计划偏差
+- T00：✅ 100%。T01：🟢 90%（代码/测试全完，PR 待主理人创建）。T02：🟡 ~40%（套件就绪，真实运行待授权）。T03/T04/T05：🟡 进行中（子 Agent）。
+- 计划偏差：无重大偏差；T02 真实运行受 Cloudflare 授权阻塞（已在无授权时完成全部本地等价工作与脚本准备），符合"不依赖单一授权而停滞"的指令。
+
+---
+
+## 真实 PR 创建地址（T01，待主理人点开）
+```
+https://github.com/yihui315/night-researcher-dash/compare/feat/p2-server-authoritative-paper...feat/p2-fixedpoint
+```
