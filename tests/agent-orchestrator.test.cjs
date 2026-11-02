@@ -115,6 +115,81 @@ test("six-role pipeline calls four AI roles and keeps execution disabled", async
   assert.equal(data.safety.paperOrderCreated, false);
 });
 
+test("agent orchestration writes server-owned run and risk events to the authenticated D1 session", async () => {
+  const { handleAgentResearch } = await modulePromise;
+  const { handlePaperSession } = await import("../functions/_lib/paper-ledger.mjs");
+  class AuditD1 {
+    constructor() { this.sessions = new Map(); this.events = []; }
+    prepare(sql) {
+      const db = this;
+      return { bind(...args) {
+        return {
+          async run() {
+            if (sql.includes("INSERT INTO paper_sessions")) {
+              const [sid, createdAt, expiresAt] = args;
+              db.sessions.set(sid, { session_id: sid, created_at: createdAt, expires_at: expiresAt, revoked_at: null });
+              return { success: true, meta: { changes: 1 } };
+            }
+            if (sql.includes("INSERT OR IGNORE INTO paper_events")) {
+              const [sid, eventId, eventType, payloadJson, createdAt] = args;
+              if (!db.events.some(event => event.session_id === sid && event.event_id === eventId)) {
+                db.events.push({ session_id: sid, event_id: eventId, event_type: eventType, payload_json: payloadJson, created_at: createdAt });
+              }
+              return { success: true, meta: { changes: 1 } };
+            }
+            throw new Error("Unexpected D1 run: " + sql);
+          },
+          async first() {
+            if (sql.includes("SELECT session_id, expires_at, revoked_at")) return db.sessions.get(args[0]) || null;
+            throw new Error("Unexpected D1 first: " + sql);
+          }
+        };
+      }};
+    }
+  }
+  const env = { PAPER_DB: new AuditD1(), PAPER_LEDGER_SECRET: "agent-test-secret-with-at-least-thirty-two-characters" };
+  const session = await handlePaperSession(new Request("https://night-researcher.test/api/paper/session", {
+    method: "POST", headers: { origin: "https://night-researcher.test", "content-type": "application/json" }, body: "{}"
+  }), env);
+  const cookie = session.headers.get("set-cookie").split(";")[0];
+  const body = {
+    runId: "123e4567-e89b-42d3-a456-426614174000",
+    provider: "minimax", model: "MiniMax-M3", apiKey: "must-never-enter-ledger", region: "china",
+    snapshot: { selectedSymbol: "BTCUSDT", observedPrice: 100000 }
+  };
+  const request = new Request("https://night-researcher.test/api/agents/research", {
+    method: "POST",
+    headers: { origin: "https://night-researcher.test", "content-type": "application/json", cookie },
+    body: JSON.stringify(body)
+  });
+  const aiHandler = async internalRequest => {
+    const payload = await internalRequest.json();
+    const role = payload.messages[0].content.match(/AGENT_ID: ([A-Z]+)/)[1];
+    const values = {
+      SPOTTER: { opportunities: [] },
+      PRIOR: { regime: "unknown", evidence: [], counter_evidence: [], unknowns: [] },
+      EDGE: { verdict: "WATCH", invalidation: "OOS fail" },
+      CLOSER: { decision: "HOLD_RESEARCH", exit_conditions: [] }
+    };
+    return new Response(JSON.stringify({ ok: true, model: payload.model, text: JSON.stringify(values[role]), usage: { total_tokens: 12 } }), {
+      status: 200, headers: { "content-type": "application/json" }
+    });
+  };
+  const response = await handleAgentResearch(request, aiHandler, env);
+  const data = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(data.runId, body.runId);
+  assert.deepEqual(env.PAPER_DB.events.map(event => event.event_type), [
+    "agent.run.started", "risk.decision", "agent.run.completed"
+  ]);
+  const decoded = env.PAPER_DB.events.map(event => JSON.parse(event.payload_json));
+  assert.ok(decoded.every(event => event.runId === body.runId));
+  assert.ok(decoded.every(event => !JSON.stringify(event).includes("must-never-enter-ledger")));
+  assert.equal(decoded[1].decision, "BLOCKED");
+  assert.equal(decoded[1].allocationPct, 0);
+  assert.equal(decoded[2].snapshotHash, data.snapshotHash);
+});
+
 test("agent run preserves structured provider output failure metadata", async () => {
   const { handleAgentResearch } = await modulePromise;
   const response = await handleAgentResearch(makeRequest({
