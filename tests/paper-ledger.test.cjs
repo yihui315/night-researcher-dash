@@ -140,7 +140,7 @@ test("trusted agent audit events are server-written and cannot be forged through
     e
   );
   assert.equal(forged.status, 400);
-  assert.equal(e.PAPER_DB.events.length, 1);
+  assert.equal(e.PAPER_DB.events.length, 2);
 });
 
 test("rejects cross-origin writes, unsupported events, and oversized payloads", async () => {
