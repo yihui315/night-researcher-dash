@@ -74,7 +74,7 @@ test("six-role pipeline calls four AI roles and keeps execution disabled", async
   const aiHandler = async request => {
     const body = await request.json();
     assert.equal(body.thinkingMode, "disabled");
-    assert.equal(body.maxTokens, 4096);
+    assert.equal(body.maxTokens, 8192);
     const prompt = body.messages[0].content;
     const match = prompt.match(/AGENT_ID: ([A-Z]+)/);
     const role = match && match[1];
