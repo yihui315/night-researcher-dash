@@ -24,9 +24,9 @@ export function createTradingApi(options = {}) {
   const fetchImpl = options.fetchImpl || fetch.bind(globalThis);
   const baseUrl = String(options.baseUrl || DEFAULT_BASE).replace(/\/$/, "");
 
-  async function request(path, init = {}) {
+  async function requestAt(url, init = {}) {
     const requestId = makeRequestId();
-    const response = await fetchImpl(baseUrl + path, {
+    const response = await fetchImpl(url, {
       credentials: "same-origin",
       cache: "no-store",
       ...init,
@@ -50,7 +50,11 @@ export function createTradingApi(options = {}) {
     return body;
   }
 
+  const request = (path, init) => requestAt(baseUrl + path, init);
+  const requestRoot = (path, init) => requestAt(path, init);
+
   return {
+    getProviderHealth: () => requestRoot("/api/health"),
     getHealth: () => request("/health"),
     getMarketSnapshot: (params = {}) => {
       const query = new URLSearchParams();
