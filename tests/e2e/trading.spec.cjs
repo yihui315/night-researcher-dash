@@ -163,6 +163,14 @@ test("server paper journal restores the account after local browser cache is cle
   expect(restored.cash).toBeLessThan(10000);
 });
 
+test("audit timeline renders the latest server-backed paper account snapshot", async ({ page }) => {
+  await expect(page.locator("#paperLedgerStatus")).toContainText("服务端备份已同步");
+  await expect(page.locator("#auditEvents")).toContainText("模拟账户快照");
+  await expect(page.locator("#auditEvents")).toContainText("session-bootstrap");
+  await page.locator("#refreshAuditBtn").click();
+  await expect(page.locator("#auditEvents")).toContainText("模拟账户快照");
+});
+
 test("enforces the per-order risk cap before paper execution", async ({ page }) => {
   await expect(page.locator("#submitOrder")).toBeEnabled();
   await page.locator("#orderQty").fill("0.02");
@@ -200,6 +208,7 @@ test("AI Provider Center is visible and the six-agent flow never persists keys",
   await expect(page.locator("#aiTeamStatus")).toContainText("流程完成");
   await expect(page.locator("#aiOutput")).toContainText("SPOTTER");
   await expect(page.locator("#aiOutput")).toContainText("KELLY");
+  await expect(page.locator("#auditEvents")).toContainText("六角色研究 · 已完成");
   const events = paperLedgerByPage.get(page);
   await expect.poll(() => events.some(event => event.eventType === "agent.run.started")).toBeTruthy();
   await expect.poll(() => events.some(event => event.eventType === "agent.run.completed")).toBeTruthy();
