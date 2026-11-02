@@ -113,6 +113,24 @@ Live 接口暂不实现。未来只有在单独部署审批后，才增加人工
 - 3D 视图不得把手续费代理画成某个代币资金流。
 - Live Trading 默认关闭，自动化测试中不存在真实交易所下单调用。
 
+## 8.1 API 已启动后的集成边界
+
+用户已反馈 JEV API 已运行。当前项目记录的本机拓扑是：
+- JEV backend：`127.0.0.1:4779`
+- JEV React/Vite frontend：`127.0.0.1:4780`
+- JEV 本地源码根：`D:\\jev`，历史 release 分支：`release/jcc-v1.3-final`
+
+这里要区分两个状态：
+1. **Provider API 可用**：JEV ProviderRegistry / ModelRouter 能调用 Jev 与 MiniMax，证明模型连接与凭据来源可用。
+2. **Trading API 可用**：`/api/v1/trading/*` 仍是本文件中的目标接口合同，不能因为 `/api/health` 或 `/api/v1/domain/route` 已运行，就宣称行情、研究运行历史、策略仓库和 Paper Engine 接口已经实现。
+
+集成时的硬要求：
+- 以 JEV Provider Center / DPAPI SecretStore 为唯一凭据来源。Trading Desk 传 `providerId`，不得再要求用户在交易模块重复输入 API Key。
+- JEV `ModelRouter` 负责决策模型路由；MiniMax/Qwen 等执行 Provider 由 JEV 后端解析。浏览器不得直接访问模型厂商 API。
+- Cloudflare Pages 上的 Night Researcher 预览站不能直接访问用户本机 `127.0.0.1:4779`。正式嵌入时必须由 JEV 的 4780 前端加载 Trading React 模块，并通过同源 Vite/production proxy 访问 4779；不要把 localhost API 地址写进云端静态页面。
+- 先完成 JEV 4779 的只读 health / market / research-run endpoints，再接 Paper account/order endpoints；Paper Engine 必须由服务端重新读取盘口并独立计算，不能信任浏览器提交的成交价或风险结果。
+- 本轮在 Night Researcher 仓库新增的 D1 是云端预览的审计/恢复日志，不替代 JEV SQLite/数据库中的权威服务端 Paper Ledger。
+
 ## 8. 当前阻塞与需要的工程输入
 
 当前 GitHub 连接中可访问的是 `yihui315/night-researcher-dash`，没有找到 JEV 源码仓库；JEV 是用户本机项目（历史记录路径 `D:\\jev`）。因此目前可以完成 Night Researcher 后端、API 合同、Agent 与风险模块，但不能诚实地声称已把 React 页面写入或运行在本机 JEV。
