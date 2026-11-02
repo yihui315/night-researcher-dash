@@ -36,13 +36,39 @@ function json(body, status = 200) {
 }
 
 function textContent(content) {
-  let value = "";
-  if (typeof content === "string") value = content;
-  else if (Array.isArray(content)) {
-    value = content.filter(part => part && part.type === "text" && typeof part.text === "string")
-      .map(part => part.text).join("\n");
+  if (typeof content === "string") return content.replace(/<think>[\\s\\S]*?<\\/think>/gi, "").trim();
+  if (Array.isArray(content)) {
+    return content.map(part => {
+      if (!part || typeof part !== "object") return "";
+      if (typeof part.text === "string" && ["text", "output_text", "text_delta"].includes(String(part.type || "text"))) return part.text;
+      if (part.type === "text" && part.text && typeof part.text.value === "string") return part.text.value;
+      return "";
+    }).filter(Boolean).join("\\n").replace(/<think>[\\s\\S]*?<\\/think>/gi, "").trim();
   }
-  return value.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  if (content && typeof content === "object") {
+    const candidate = typeof content.text === "string" ? content.text : typeof content.value === "string" ? content.value : "";
+    return candidate.replace(/<think>[\\s\\S]*?<\\/think>/gi, "").trim();
+  }
+  return "";
+}
+
+function responseDiagnostics(data, choice, message) {
+  const content = message && message.content;
+  const usage = data && data.usage || {};
+  return {
+    responseId: typeof data?.id === "string" ? data.id.slice(0, 120) : null,
+    finishReason: String(choice?.finish_reason || "unknown"),
+    contentType: Array.isArray(content) ? "array" : content === null ? "null" : typeof content,
+    contentPresent: typeof content === "string" ? content.trim().length > 0 : Array.isArray(content) ? content.length > 0 : !!content,
+    contentParts: Array.isArray(content) ? content.length : null,
+    hasReasoningContent: typeof message?.reasoning_content === "string" && message.reasoning_content.length > 0,
+    hasToolCalls: Array.isArray(message?.tool_calls) && message.tool_calls.length > 0,
+    usage: {
+      prompt_tokens: Number(usage.prompt_tokens || 0),
+      completion_tokens: Number(usage.completion_tokens || 0),
+      total_tokens: Number(usage.total_tokens || 0)
+    }
+  };
 }
 
 export async function handleAiChat(request, fetchImpl = fetch) {
@@ -167,11 +193,13 @@ export async function handleAiChat(request, fetchImpl = fetch) {
     const message = choice && choice.message;
     const content = textContent(message && message.content);
     if (!content) {
-      const finishReason = String(choice && choice.finish_reason || "unknown");
-      const error = finishReason === "length"
-        ? "模型在生成最终回答前达到 Token 上限；请提高输出预算或使用结构化输出模式"
-        : "模型没有返回最终文本内容；内部思考字段不会被当作答案使用";
-      return json({ ok: false, code: "EMPTY_FINAL_CONTENT", error, finishReason }, 502);
+      const diagnostics = responseDiagnostics(data, choice, message);
+      let error = "模型未返回可显示的最终文本；已保留响应诊断，未把内部思考内容当作答案";
+      if (diagnostics.finishReason === "length") error = "模型输出达到 Token 上限，未生成完整最终答案";
+      else if (diagnostics.hasReasoningContent) error = "模型返回了独立思考字段，但没有最终答案；为保护推理内容，系统不会展示该字段";
+      else if (diagnostics.hasToolCalls) error = "模型返回了工具调用，但当前研究角色只接受最终 JSON 文本";
+      else if (diagnostics.finishReason === "content_filter") error = "模型响应被上游内容过滤器截断";
+      return json({ ok: false, code: "EMPTY_FINAL_CONTENT", error, ...diagnostics }, 502);
     }
 
     return json({
