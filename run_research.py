@@ -24,7 +24,7 @@ from backtest_engine import (
 )
 from strategies import STRATEGIES
 from brc20_runes_monitor import analyze_brc20_runes
-from connectors_extra import fetch_funding_rate, fetch_liquidations, fetch_runes_top
+from connectors_extra import fetch_funding_rate, fetch_liquidations, fetch_runes_top, fetch_crc20_market_snapshot
 
 WORKDIR = os.path.dirname(os.path.abspath(__file__))
 OUTDIR = os.path.join(WORKDIR, "output")
@@ -182,7 +182,7 @@ def main():
 
     # ============ §七 永续/RUNES 补充数据（可达环境可用） ============
     print("[*] 调用 RUNES/资金费率/爆仓 连接器 ...")
-    supp_md, supp_struct = _build_supplementary()
+    supp_md, supp_struct = _build_supplementary(now_ms)
 
     # ============ 组装研究结论 JSON（单一数据源，供前端实时刷新） ============
     eco = mon.get("facts", {}) if mon.get("ok") else {}
@@ -519,12 +519,21 @@ def _norm_runes(runes):
     return base
 
 
-def _build_supplementary():
+def _build_supplementary(now_ms=None):
     """RUNES / 资金费率 / 爆仓 连接器结果（配 key + 可达网络即真用；本环境优雅降级为未知）。
     返回 (markdown, struct)：struct 供前端 JSON 渲染，且对无 key 环境保持诚实的「未知」。"""
     fr = fetch_funding_rate("BTCUSDT")
     liq = fetch_liquidations("BTCUSDT")
     runes = fetch_runes_top(20)
+    now_ms = int(now_ms or time.time() * 1000)
+    btc_price = None
+    try:
+        btc_bars = fetch_klines("BTCUSDT", "1m", now_ms - 3600_000, now_ms)
+        if btc_bars:
+            btc_price = str(btc_bars[-1]["c"])
+    except Exception:
+        btc_price = None
+    crc20 = fetch_crc20_market_snapshot(btc_usdt=btc_price)
 
     L = ["\n## 七、永续 / RUNES 补充数据（配 key + 可达网络自动启用）\n"]
     L.append("> 以下接口在**可访问网络**或配置对应 **API key** 后自动取数；本环境（仅放行 Binance 镜像 / "
@@ -568,7 +577,28 @@ def _build_supplementary():
         L.append("  - `UNISAT_API_KEY=xxx` → UniSat `/v3/market/runes/tokens`")
         L.append("  - `DUNE_API_KEY=xxx` + `DUNE_RUNES_QUERY_ID=yyy` → Dune 查询")
 
-    L.append("\n### 7.4 研究局限与已落地项（诚实标注）\n")
+    L.append("\n### 7.4 CRC-20 / LEAF（Bitcoin L1 ledger）")
+    if crc20.get("ok"):
+        trust = crc20.get("trust") or {}
+        token = crc20.get("token") or {}
+        market = crc20.get("marketplace") or {}
+        pool = crc20.get("pool") or {}
+        idx = crc20.get("indexer") or {}
+        L.append("- Indexer：synced={}；height={}；statsHeight={}".format(trust.get("indexerSynced"), idx.get("height"), idx.get("statsHeight")))
+        L.append("- LEAF supply（atoms，8 decimals）：{}；holders：{}".format(token.get("supplyAtoms", "unknown"), token.get("holders", "unknown")))
+        L.append("- 最近 marketplace sale：{} sat/LEAF；BTC 参考价换算 USD：{}".format(market.get("lastSaleUnitPriceSat") or "unknown", market.get("lastSaleUsdDerived") or "unknown"))
+        L.append("- 最近 AXBT/LEAF pool swap：{} sat/LEAF（由 pool.last 原子数量换算）".format(pool.get("lastSwapUnitPriceSatDerived") or "unknown"))
+        L.append("- latest confirmed trade、6h VWAP、best bid/ask：unknown（公开 API 未提供可验证的完整实时订单簿；不以 floor/历史快照代替）。")
+        if not trust.get("indexerSynced"):
+            L.append("- **信任状态：暂不放行**。Indexer 未报告 synced=true；不能把缺失/404 当成无交易。")
+        else:
+            L.append("- Indexer 报告 synced=true；仍需与 crc.garden/activity 及 Bitcoin 区块/交易证据交叉核对。")
+        L.append("- 交叉核对入口：https://crc.garden/activity；API 原始字段已写入 research.json 的 supplementary.crc20。")
+    else:
+        L.append("- **未知**：{}".format(crc20.get("errors")))
+        L.append("- API：https://crc20.org/api/v1/status、/stats/LEAF、/history；公共只读 API，建议 30–60 秒节奏轮询。")
+
+    L.append("\n### 7.5 研究局限与已落地项（诚实标注）\n")
     L.append("1. **BRC20 样本内高收益「非 Beta、但过拟合」已证实**：§六 网格交叉验证显示，ORDI/SATS 在"
              "`BRC20_RSI_MR` 上最佳参数样本内亮眼、但相邻参数即翻负、OOS 不稳 → **过拟合嫌疑高**，框架维持「不予放行」。")
     L.append("2. **超额收益已升为主放行门槛（g4）**：策略须相对买入持有为正才可通过；BTC/ETH 上原策略跑输大盘，"
@@ -582,6 +612,7 @@ def _build_supplementary():
         "fundingRate": _norm_fr(fr),
         "liquidations": _norm_liq(liq),
         "runes": _norm_runes(runes),
+        "crc20": crc20,
     }
     return "\n".join(L), supp_struct
 
