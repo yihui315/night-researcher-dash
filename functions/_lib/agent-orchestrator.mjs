@@ -209,7 +209,8 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat, env
     model: String(body.model || ""),
     promptVersion: "nr-agent-research-v1",
     startedAt,
-    snapshotSource: "browser-request-untrusted"
+    snapshotSource: "browser-request-untrusted",
+    snapshot
   });
   const providerConfig = {
     provider: body.provider,
