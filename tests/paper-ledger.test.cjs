@@ -151,6 +151,8 @@ test("rejects cross-origin writes, unsupported events, and oversized payloads", 
   assert.equal(cross.status, 403);
   const invalid = await handlePaperLedger(request("https://nr.example/api/paper/ledger", "POST", cookie, { eventId: "event-0000002", eventType: "paper.live.order", payload: {} }), e);
   assert.equal(invalid.status, 400);
+  const forgedOrder = await handlePaperLedger(request("https://nr.example/api/paper/ledger", "POST", cookie, { eventId: "event-order-00001", eventType: "paper.order.created", payload: { side: "BUY", qty: 1 } }), e);
+  assert.equal(forgedOrder.status, 400);
   const huge = await handlePaperLedger(request("https://nr.example/api/paper/ledger", "POST", cookie, { eventId: "event-0000003", eventType: "paper.account.snapshot", payload: { data: "x".repeat(151000) } }), e);
   assert.equal(huge.status, 413);
   assert.equal(e.PAPER_DB.events.length, 0);
