@@ -124,7 +124,8 @@ class FakeD1 {
       return { success: true, meta: { changes: 1 } };
     }
     if (sql.startsWith("INSERT OR IGNORE INTO paper_server_events") && sql.includes("SELECT")) {
-      const [sid, eventId, commandId, eventType, schemaVersion, payloadJson, createdAt, guardSid, version, guardCommand] = args;
+      const [sid, eventId, commandId, eventType, payloadJson, createdAt, guardSid, version, guardCommand] = args;
+      const schemaVersion = 1;
       const account = this.accounts.get(guardSid);
       if (!account || Number(account.version) !== Number(version) || account.last_command_id !== guardCommand) return { success: true, meta: { changes: 0 } };
       if (this.events.some(row => row.session_id === sid && row.event_id === eventId)) return { success: true, meta: { changes: 0 } };
