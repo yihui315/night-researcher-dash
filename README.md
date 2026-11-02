@@ -206,5 +206,6 @@ python -m unittest discover -s tests -p "test_*.py"
 - 回测风险质量新增：胜率 95% Wilson 区间、Expectancy、Profit Factor、每笔 Sharpe/Sortino（不年化）、交易收益 bootstrap Monte Carlo（1,000 次）和额外每边 0/5/10/20/50 bps 滑点敏感性；Monte Carlo 不模拟盘口路径/序列相关，不能当作收益预测。
 - CRC20/LEAF：新增 `fetch_crc20_status`、`fetch_crc20_stats`、`fetch_crc20_history`、`fetch_crc20_market_snapshot`；marketplace sale 与 AXBT/LEAF pool swap 分开，不把它们合成一个虚假的 latest_trade。
 - CRC20 公开 API 没有可验证的完整订单簿，因此 best bid/ask、6h VWAP、统一 latest_trade 保持 unknown；需要和 `https://crc.garden/activity`、Bitcoin 区块/交易证据交叉核验。
+- 3D 市场宇宙：新增 Binance 90 天 4h 收益相关性连线；明确标记为价格相关性，不伪装成资金流。真实资金流边仍待接入链上/DEX 成交证据。
 - 当前分支仍是 Night Researcher 预览原型；JEV 本地 React 前端、Provider Center DPAPI、4779 后端和六个 React 页面尚未真正集成。必须在可访问的 JEV 源码上完成，不宣称已完成。
 
