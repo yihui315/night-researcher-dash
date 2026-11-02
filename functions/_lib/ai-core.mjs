@@ -71,6 +71,14 @@ export async function handleAiChat(request, fetchImpl = fetch) {
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
   if (!["minimax", "qwen"].includes(provider)) return json({ error: "不支持的 AI 服务商" }, 400);
   if (apiKey.length < 12 || apiKey.length > 500) return json({ error: "请检查 API Key" }, 400);
+  const maxTokens = body.maxTokens == null ? 2048 : Number(body.maxTokens);
+  if (!Number.isInteger(maxTokens) || maxTokens < 256 || maxTokens > 8192) {
+    return json({ error: "maxTokens 必须是 256–8192 之间的整数" }, 400);
+  }
+  const thinkingMode = body.thinkingMode == null ? "adaptive" : String(body.thinkingMode);
+  if (provider === "minimax" && !["adaptive", "disabled"].includes(thinkingMode)) {
+    return json({ error: "MiniMax thinkingMode 仅支持 adaptive 或 disabled" }, 400);
+  }
 
   let endpoint;
   let model;
@@ -130,8 +138,12 @@ export async function handleAiChat(request, fetchImpl = fetch) {
         temperature: 0.2,
         stream: false,
         ...(provider === "minimax"
-          ? { max_completion_tokens: 1200, thinking: { type: "adaptive" }, reasoning_split: true }
-          : { max_tokens: 1200 })
+          ? {
+              max_completion_tokens: maxTokens,
+              thinking: { type: thinkingMode },
+              reasoning_split: thinkingMode === "adaptive"
+            }
+          : { max_tokens: maxTokens })
       }),
       signal: AbortSignal.timeout(45000)
     });
@@ -151,14 +163,23 @@ export async function handleAiChat(request, fetchImpl = fetch) {
       return json({ error: `AI 服务商请求失败（HTTP ${upstream.status}）` }, 502);
     }
 
-    const content = textContent(data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content);
-    if (!content) return json({ error: "模型响应中没有可显示的文本内容" }, 502);
+    const choice = data && data.choices && data.choices[0];
+    const message = choice && choice.message;
+    const content = textContent(message && message.content);
+    if (!content) {
+      const finishReason = String(choice && choice.finish_reason || "unknown");
+      const error = finishReason === "length"
+        ? "模型在生成最终回答前达到 Token 上限；请提高输出预算或使用结构化输出模式"
+        : "模型没有返回最终文本内容；内部思考字段不会被当作答案使用";
+      return json({ ok: false, code: "EMPTY_FINAL_CONTENT", error, finishReason }, 502);
+    }
 
     return json({
       ok: true,
       provider,
       model,
       text: content,
+      finishReason: String(choice && choice.finish_reason || "unknown"),
       usage: data.usage || null
     });
   } catch (error) {
