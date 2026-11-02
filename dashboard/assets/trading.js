@@ -78,13 +78,6 @@
       setLedgerStatus("本地缓存 · 云端同步失败", "warning");
     }
   }
-  window.NRTradingAppendLedgerEvent = function (eventType, payload) {
-    if (!state.ledger) return Promise.resolve({ ok: false, available: false });
-    const id = typeof crypto !== "undefined" && crypto.randomUUID
-      ? crypto.randomUUID()
-      : "evt-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 14);
-    return state.ledger.appendEvent({ eventId: id, eventType, payload: payload || {} });
-  };
   function setConnection(text, offline) {
     const el = $("connectionStatus"); if (!el) return;
     el.textContent = text; el.classList.toggle("offline", !!offline);
