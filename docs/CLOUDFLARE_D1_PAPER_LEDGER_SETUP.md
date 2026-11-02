@@ -42,12 +42,12 @@ Add it as a Pages environment variable named `PAPER_LEDGER_SECRET` for Preview a
 
 ## 4. Endpoints
 
-- `POST /api/paper/session`: creates or reuses a 7-day session. The signed token is set in a `Secure; HttpOnly; SameSite=Strict` cookie scoped to `/api/paper`.
+- `POST /api/paper/session`: creates or reuses a 7-day session. The signed token is set in a `Secure; HttpOnly; SameSite=Strict` cookie scoped to `/api/`, so the trusted research endpoint can append its own audit records.
 - `POST /api/paper/ledger`: append 1–20 allowlisted events. Repeated event IDs are idempotent.
 - `GET /api/paper/ledger?after=0&limit=50`: read events after a sequence cursor.
 - `GET /api/paper/ledger?latest=1&eventType=paper.account.snapshot&limit=1`: recover the newest account snapshot.
 
-The server enforces same-origin requests, HMAC session signatures, session expiry/revocation, a 150 KB per-event payload cap and a 10,000-event per-session cap. API keys are never part of the ledger contract.
+The server enforces same-origin requests, HMAC session signatures, session expiry/revocation, a 150 KB per-event payload cap and a 10,000-event per-session cap. API keys are never part of the ledger contract. The browser endpoint can append paper-account snapshots only; `agent.run.*`, `risk.decision` and `paper.server.order.*` events are reserved for trusted server code.
 
 ## 5. UI behavior and trust boundary
 
@@ -56,7 +56,7 @@ The Trading Desk displays one of these states:
 - **已从服务端恢复模拟账户**: the latest saved snapshot restored the browser's paper account.
 - **仅本地 / 云端同步失败**: D1 or the signing secret is not configured, or the service is unavailable. Local simulation remains available.
 
-Important: this first D1 milestone is an **append-only audit and recovery journal**, not yet an authoritative execution ledger. The snapshot originates from the browser's paper engine and is therefore untrusted for Kelly sizing, strategy promotion, or any live-trading decision. The server does not accept live orders and does not claim to independently recompute fills. The next milestone is moving deterministic paper-order validation and fills into the trusted JEV/Worker backend and writing server-generated order/fill events.
+Important: this first D1 milestone is an **append-only audit and recovery journal**, not yet an authoritative execution ledger. The account snapshot originates from the browser's paper engine and is therefore untrusted for Kelly sizing, strategy promotion, or any live-trading decision. Agent run start/completion/failure events are now written by the Pages Function itself (not the browser), including run ID, snapshot hash, prompt/model metadata, exact input snapshot, outputs and token usage. The server does not accept live orders and does not claim to independently recompute paper fills. The next milestone is moving deterministic paper-order validation and fills into the trusted JEV/Worker backend and writing server-generated order/fill events.
 
 ## 6. Verification
 
