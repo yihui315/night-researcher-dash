@@ -232,7 +232,7 @@ test("AI proxy extracts OpenAI-compatible output_text content blocks", async () 
   }), { status: 200, headers: { "content-type": "application/json" } }));
   const data = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(data.text, "{\\"opportunities\\":[]}");
+  assert.equal(data.text, '{"opportunities":[]}');
 });
 
 test("AI proxy returns redacted diagnostics when provider returns reasoning but no final content", async () => {
