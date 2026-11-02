@@ -168,7 +168,7 @@ test("agent orchestration writes server-owned run and risk events to the authent
     const values = {
       SPOTTER: { opportunities: [] },
       PRIOR: { regime: "unknown", evidence: [], counter_evidence: [], unknowns: [] },
-      EDGE: { verdict: "WATCH", invalidation: "OOS fail" },
+      EDGE: { verdict: "WATCH", symbol: "BTCUSDT", side: "WATCH", hypothesis: "待验证", invalidation: "OOS fail", costs_to_test: [], required_evidence: [] },
       CLOSER: { decision: "HOLD_RESEARCH", exit_conditions: [] }
     };
     return new Response(JSON.stringify({ ok: true, model: payload.model, text: JSON.stringify(values[role]), usage: { total_tokens: 12 } }), {
@@ -227,4 +227,29 @@ test("TAKER blocks WATCH and REJECT decisions even if a Kelly size exists", asyn
   });
   assert.equal(plan.status, "BLOCKED");
   assert.equal(plan.autoSubmit, false);
+});
+
+
+test("agent output with a non-allowlisted symbol is rejected before later roles run", async () => {
+  const { handleAgentResearch } = await modulePromise;
+  const calls = [];
+  const response = await handleAgentResearch(makeRequest({
+    provider: "minimax", model: "MiniMax-M3", apiKey: "mm-test-key-123456",
+    region: "china", snapshot: { selectedSymbol: "BTCUSDT" }
+  }), async request => {
+    const body = await request.json();
+    const role = body.messages[0].content.match(/AGENT_ID: ([A-Z]+)/)[1];
+    calls.push(role);
+    const value = role === "SPOTTER"
+      ? { opportunities: [{ symbol: "SCAMUSDT", setup: "fake", evidence: ["unverified"], missing_data: [], watch_only: true }] }
+      : {};
+    return new Response(JSON.stringify({ ok: true, model: body.model, text: JSON.stringify(value) }), {
+      status: 200, headers: { "content-type": "application/json" }
+    });
+  });
+  const data = await response.json();
+  assert.equal(response.status, 502);
+  assert.equal(data.agent, "SPOTTER");
+  assert.deepEqual(calls, ["SPOTTER"]);
+  assert.equal(data.autoExecution, false);
 });
