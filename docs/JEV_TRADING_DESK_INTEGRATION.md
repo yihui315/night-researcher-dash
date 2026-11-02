@@ -135,4 +135,4 @@ Live 接口暂不实现。未来只有在单独部署审批后，才增加人工
 
 当前 GitHub 连接中可访问的是 `yihui315/night-researcher-dash`，没有找到 JEV 源码仓库；JEV 是用户本机项目（历史记录路径 `D:\\jev`）。因此目前可以完成 Night Researcher 后端、API 合同、Agent 与风险模块，但不能诚实地声称已把 React 页面写入或运行在本机 JEV。
 
-真正完成 JEV 联调需要把 JEV 源码仓库授权给当前 GitHub 连接，或提供当前 `D:\\jev` 源码包/关键目录（至少 package.json、src 路由/布局、Provider Center、4779 backend route/secret store）。拿到后直接按上述合同把模块挂入现有项目，不新建第二个独立前端。
+已在 Night Researcher 仓库准备 `integration/jev/tradingApi.mjs` 与类型声明：它可读取现有 JEV `/api/health`，并为 `/api/v1/trading/*` 提供同源客户端；研究请求只传 providerId，模拟下单要求 confirmationId。该适配器已经有独立 Node 测试，但它不是 JEV 的实际路由实现。真正完成 JEV 联调仍需把 JEV 源码仓库授权给当前 GitHub 连接，或提供当前 `D:\\jev` 源码包/关键目录（至少 package.json、src 路由/布局、Provider Center、4779 backend route/secret store）。拿到后直接按上述合同把模块挂入现有项目，不新建第二个独立前端。
