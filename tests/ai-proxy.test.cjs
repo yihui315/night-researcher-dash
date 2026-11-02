@@ -147,11 +147,55 @@ test("MiniMax request uses completion-token controls and does not surface hidden
     }), { status: 200, headers: { "content-type": "application/json" } });
   });
   const data = await response.json();
-  assert.equal(payload.max_completion_tokens, 1200);
+  assert.equal(payload.max_completion_tokens, 2048);
   assert.equal(payload.reasoning_split, true);
   assert.deepEqual(payload.thinking, { type: "adaptive" });
   assert.equal(data.text, "最终结论");
   assert.doesNotMatch(data.text, /private reasoning|<think>/);
+});
+
+test("MiniMax structured-agent mode disables adaptive reasoning and reserves final JSON budget", async () => {
+  const { handleAiChat } = await corePromise;
+  let payload;
+  const response = await handleAiChat(makeRequest({
+    provider: "minimax", model: "MiniMax-M3", region: "china", apiKey: "mm-test-key-123456",
+    thinkingMode: "disabled", maxTokens: 4096,
+    messages: [{ role: "user", content: "只输出 JSON 对象" }]
+  }), async (_url, init) => {
+    payload = JSON.parse(init.body);
+    return okResponse("{\"ok\":true}");
+  });
+  const data = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(payload.max_completion_tokens, 4096);
+  assert.deepEqual(payload.thinking, { type: "disabled" });
+  assert.equal(payload.reasoning_split, false);
+  assert.equal(data.text, "{\"ok\":true}");
+});
+
+test("MiniMax reasoning-only response is not exposed as a final answer", async () => {
+  const { handleAiChat } = await corePromise;
+  const response = await handleAiChat(makeRequest({
+    provider: "minimax", model: "MiniMax-M3", region: "china", apiKey: "mm-test-key-123456",
+    messages: [{ role: "user", content: "给出最终结论" }]
+  }), async () => new Response(JSON.stringify({
+    choices: [{ finish_reason: "length", message: { content: null, reasoning_content: "不得展示的内部思考" } }],
+    usage: { total_tokens: 1200 }
+  }), { status: 200, headers: { "content-type": "application/json" } }));
+  const data = await response.json();
+  assert.equal(response.status, 502);
+  assert.equal(data.code, "EMPTY_FINAL_CONTENT");
+  assert.equal(data.finishReason, "length");
+  assert.doesNotMatch(JSON.stringify(data), /不得展示的内部思考/);
+});
+
+test("AI proxy rejects completion budgets outside the bounded range", async () => {
+  const { handleAiChat } = await corePromise;
+  const response = await handleAiChat(makeRequest({
+    provider: "minimax", model: "MiniMax-M3", region: "china", apiKey: "mm-test-key-123456",
+    maxTokens: 20000, messages: [{ role: "user", content: "hello" }]
+  }), async () => okResponse());
+  assert.equal(response.status, 400);
 });
 
 test("Qwen Model Studio supports the documented Hong Kong workspace endpoint", async () => {
