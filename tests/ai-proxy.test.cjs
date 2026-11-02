@@ -225,7 +225,7 @@ test("AI proxy extracts OpenAI-compatible output_text content blocks", async () 
   }), async () => new Response(JSON.stringify({
     id: "chatcmpl-output-block",
     choices: [{ finish_reason: "stop", message: { content: [
-      { type: "output_text", text: "{\\"opportunities\\":[]}" },
+      { type: "output_text", text: '{"opportunities":[]}' },
       { type: "text", text: "" }
     ] } }],
     usage: { prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 }
