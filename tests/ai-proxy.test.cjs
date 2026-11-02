@@ -42,11 +42,11 @@ test("MiniMax M3 routes to official OpenAI-compatible endpoint", async () => {
   assert.equal(data.ok, true);
 });
 
-test("Qwen Coder uses workspace and selected region", async () => {
+test("Qwen Model Studio uses workspace and selected region", async () => {
   const { handleAiChat } = await corePromise;
   let calledUrl = "";
   const response = await handleAiChat(makeRequest({
-    provider: "qwen", model: "qwen3.7-plus", apiKey: "sk-general-test-123456",
+    provider: "qwen", model: "qwen3-coder-next", apiKey: "sk-general-test-123456",
     region: "singapore", workspaceId: "ws-night-researcher",
     messages: [{ role: "user", content: "检查模拟交易风险闸门" }]
   }), async url => {
@@ -111,10 +111,10 @@ test("MiniMax global key uses the global endpoint", async () => {
   assert.equal(calledUrl, "https://api.minimax.io/v1/chat/completions");
 });
 
-test("Qwen proxy rejects models outside the current Model Studio allowlist", async () => {
+test("Qwen proxy rejects model IDs outside the current Model Studio allowlist", async () => {
   const { handleAiChat } = await corePromise;
   const response = await handleAiChat(makeRequest({
-    provider: "qwen", model: "qwen3-coder-plus", apiKey: "sk-general-test-123456",
+    provider: "qwen", model: "qwen3-not-a-real-model", apiKey: "sk-general-test-123456",
     region: "singapore", workspaceId: "ws-test",
     messages: [{ role: "user", content: "hello" }]
   }), async () => okResponse());
