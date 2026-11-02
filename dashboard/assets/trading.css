@@ -40,3 +40,6 @@
 
 
 .ai-selftest-result{white-space:pre-line;line-height:1.7;color:var(--muted);font-size:12px;padding:10px;border:1px dashed var(--line);border-radius:9px;background:rgba(5,10,18,.32);overflow-wrap:anywhere}
+
+
+.ai-provider-center{scroll-margin-top:82px}.ai-provider-center .panel-head h2{letter-spacing:.2px}.team-actions{align-items:center}.team-output{max-height:420px}.team-output .ai-message{font-size:11px}
