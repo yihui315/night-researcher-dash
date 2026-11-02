@@ -934,10 +934,10 @@ def format_card(card):
     ci = ins.get("win_rate_ci95") or {}
     if ins.get("win_rate") is not None:
         ci_text = f"（95% Wilson CI {ci.get('lower', 0):.1%}–{ci.get('upper', 0):.1%}）" if ci else ""
-        pf = "∞" if ins.get("profit_factor_unbounded") else _fmt_pct(ins.get("profit_factor"))
+        pf = "∞" if ins.get("profit_factor_unbounded") else _fmt_ratio(ins.get("profit_factor"))
         lines.append(f"- **样本内质量**：胜率 {ins['win_rate']:.1%}{ci_text}；Expectancy {_fmt_pct(ins.get('expectancy'))}；PF {pf}；Sharpe/Sortino（每笔）{_fmt_pct(ins.get('sharpe_per_trade'))}/{_fmt_pct(ins.get('sortino_per_trade'))}")
     if oos.get("win_rate") is not None:
-        lines.append(f"- **OOS 质量**：胜率 {oos['win_rate']:.1%}；Expectancy {_fmt_pct(oos.get('expectancy'))}；PF {'∞' if oos.get('profit_factor_unbounded') else _fmt_pct(oos.get('profit_factor'))}")
+        lines.append(f"- **OOS 质量**：胜率 {oos['win_rate']:.1%}；Expectancy {_fmt_pct(oos.get('expectancy'))}；PF {'∞' if oos.get('profit_factor_unbounded') else _fmt_ratio(oos.get('profit_factor'))}")
     mc = (metrics.get("monte_carlo") or {}).get("full") or {}
     if mc.get("status") == "ESTIMATE":
         lines.append(f"- **Monte Carlo（交易收益 bootstrap）**：终值 P05/P50/P95 {_fmt_pct(mc.get('terminal_return_p05'))}/{_fmt_pct(mc.get('terminal_return_p50'))}/{_fmt_pct(mc.get('terminal_return_p95'))}；亏损路径概率 {_fmt_pct(mc.get('probability_of_loss'))}；MDD P95 {_fmt_pct(mc.get('max_drawdown_p95'))}")
@@ -958,6 +958,12 @@ def _fmt_pct(x):
     if x is None:
         return "未知(样本不足)"
     return f"{x:.2%}"
+
+
+def _fmt_ratio(x):
+    if x is None:
+        return "未知"
+    return f"{x:.2f}"
 
 
 def build_morning_report(cards, fng_now, fng_prev, stable, sources_note, gen_time):
