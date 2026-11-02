@@ -309,8 +309,6 @@
     state.book = { bids: d.bids || [], asks: d.asks || [] };
     state.bookUpdatedAt = Date.now();
     renderBook();
-    const updates = window.NRPaper.processOpenOrders(state.account, state.symbol, state.book, marks());
-    if (updates.length) { persist("open-order-fill-or-reject"); setFeedback("限价委托状态已更新：" + updates.map(x => x.id + " " + x.status).join("、"), "success"); }
     updateEstimate();
     renderAccount();
   }
@@ -442,7 +440,9 @@
     setText("availableCash", "可用现金 " + money(s.availableCash));
     const risk = $("riskState"); risk.textContent = s.dailyLossLocked ? "单日亏损熔断：暂停新增买入" : s.drawdownLocked ? "账户回撤熔断：暂停新增买入" : "风险闸门正常"; risk.classList.toggle("warning", s.dailyLossLocked || s.drawdownLocked);
     renderPositions(s.positions); renderOrders(); renderTrades();
-    $("submitOrder").disabled = !state.book.asks.length || !state.book.bids.length;
+    $("submitOrder").disabled = !state.serverReady || state.serverBusy || !state.book.asks.length || !state.book.bids.length;
+    if (!state.serverReady) $("submitOrder").title = "服务端权威模拟引擎未连接；禁止使用浏览器本地下单";
+    else $("submitOrder").title = "订单将由服务器重新读取盘口并执行确定性撮合";
   }
   function renderPositions(positions) {
     const host = $("positionsBody"); host.innerHTML = "";
@@ -456,11 +456,11 @@
   }
   function renderOrders() {
     const host = $("openOrdersBody"); host.innerHTML = "";
-    const orders = state.account.orders.filter(o => o.status === "OPEN");
+    const orders = state.account.orders.filter(o => (o.status === "OPEN" || o.status === "PARTIALLY_FILLED") && Number(o.remainingQty) > 0);
     if (!orders.length) { host.innerHTML = '<tr><td colspan="6" class="empty-cell">暂无挂单</td></tr>'; return; }
     orders.forEach(o => {
       const tr = document.createElement("tr");
-      [assetName(o.symbol), o.side === "BUY" ? "买入" : "卖出", "限价", num(o.qty, 7), priceFmt(o.limitPrice)].forEach(v => { const td = document.createElement("td"); td.textContent = v; tr.appendChild(td); });
+      [assetName(o.symbol), o.side === "BUY" ? "买入" : "卖出", "限价", num(o.remainingQty || o.qty, 7), priceFmt(o.limitPrice)].forEach(v => { const td = document.createElement("td"); td.textContent = v; tr.appendChild(td); });
       const td = document.createElement("td"), b = document.createElement("button"); b.className = "ghost-btn"; b.textContent = "撤单"; b.dataset.cancel = o.id; td.appendChild(b); tr.appendChild(td); host.appendChild(tr);
     });
   }
@@ -486,13 +486,49 @@
     $("submitOrder").textContent = "模拟" + (state.side === "BUY" ? "买入" : "卖出") + " " + assetName(state.symbol);
     $("submitOrder").className = "submit-order " + (state.side === "BUY" ? "buy" : "sell");
   }
-  function submitOrder() {
+  async function submitOrder() {
+    if (!state.serverReady || state.serverBusy) {
+      setFeedback("服务端权威模拟引擎未连接；已阻止浏览器本地下单。", "error");
+      return;
+    }
+    const type = $("orderType").value;
+    const payload = {
+      clientOrderId: crypto.randomUUID(),
+      confirmationId: crypto.randomUUID(),
+      symbol: state.symbol,
+      side: state.side,
+      type,
+      quantity: Number($("orderQty").value)
+    };
+    if (type === "LIMIT") payload.limitPrice = Number($("limitPrice").value);
+    state.serverBusy = true;
+    $("submitOrder").disabled = true;
     try {
-      const result = window.NRPaper.placeOrder(state.account, { symbol: state.symbol, side: state.side, type: $("orderType").value, qty: Number($("orderQty").value), limitPrice: Number($("limitPrice").value) }, state.book, marks());
-      persist("order-submitted-" + String(result.status || "unknown").toLowerCase()); $("orderQty").value = "";
-      setFeedback(result.status === "FILLED" ? "模拟成交成功：" + result.order.side + " " + num(result.order.filledQty, 7) + " @ " + priceFmt(result.order.avgFillPrice) : "限价委托已挂出：" + result.order.id + "。触价且可见深度足够时尝试模拟成交。", "success");
-    } catch (e) { setFeedback(e.message || "订单未能提交", "error"); }
-    updateEstimate();
+      const result = await paperRequest("/api/paper/orders", "POST", payload, [409]);
+      const data = result.data;
+      if (data.account) mergeServerAccount(data);
+      if (data.order && data.order.status === "REJECTED") {
+        setFeedback("服务端拒绝订单：" + (data.rejection && data.rejection.reason || data.order.reason || "风险门禁未通过"), "error");
+      } else if (data.order) {
+        $("orderQty").value = "";
+        const order = data.order;
+        const status = order.status === "FILLED" ? "已全部成交" : order.status === "PARTIALLY_FILLED" ? "部分成交，剩余委托继续挂单" : "限价委托已由服务端挂出";
+        setFeedback(status + "：" + order.side + " " + num(order.filledQty || 0, 8) + " / " + num(order.qty, 8) + " @ " + priceFmt(order.avgFillPrice || order.limitPrice), "success");
+      } else {
+        throw new Error(data.error || "服务端未返回订单结果");
+      }
+      void refreshAudit();
+    } catch (error) {
+      setFeedback(error.message || "订单未能提交", "error");
+      if (error.status === 503 || error.status === 401) {
+        state.serverReady = false;
+        setLedgerStatus("服务端连接中断 · 已禁止下单", "warning");
+      }
+    } finally {
+      state.serverBusy = false;
+      renderAccount();
+      updateEstimate();
+    }
   }
   function bindControls() {
     $("symbolSelect").addEventListener("change", e => selectSymbol(e.target.value));
@@ -507,8 +543,29 @@
       $("orderQty").value = (base * p / price / (state.side === "BUY" ? 1.001 : 1)).toPrecision(7); updateEstimate();
     }));
     $("submitOrder").addEventListener("click", submitOrder);
-    $("openOrdersBody").addEventListener("click", e => { const b = e.target.closest("[data-cancel]"); if (!b) return; if (window.NRPaper.cancelOrder(state.account, b.dataset.cancel)) { persist("order-cancelled"); setFeedback("已撤销模拟委托 " + b.dataset.cancel, "success"); } });
-    $("resetAccount").addEventListener("click", () => { if (!confirm("确定将模拟账户重置为 $10,000？历史服务端事件记录仍会保留。")) return; state.account = window.NRPaper.resetAccount(); persist("account-reset"); setFeedback("模拟账户已重置。", "success"); });
+    $("openOrdersBody").addEventListener("click", async e => {
+      const b = e.target.closest("[data-cancel]");
+      if (!b || !state.serverReady) return;
+      b.disabled = true;
+      try {
+        const result = await paperRequest("/api/paper/orders/" + encodeURIComponent(b.dataset.cancel) + "/cancel", "POST", { clientActionId: crypto.randomUUID() });
+        mergeServerAccount(result.data);
+        setFeedback("服务端已撤销模拟委托 " + b.dataset.cancel, "success");
+        void refreshAudit();
+      } catch (error) { setFeedback(error.message || "撤单失败", "error"); }
+      finally { renderAccount(); }
+    });
+    $("resetAccount").addEventListener("click", async () => {
+      if (!state.serverReady || !confirm("确定将服务端模拟账户重置为 $10,000？此前订单、成交和事件仍保留在审计账本。")) return;
+      try {
+        const result = await paperRequest("/api/paper/account/reset", "POST", { clientActionId: crypto.randomUUID(), confirmationId: crypto.randomUUID() });
+        mergeServerAccount(result.data);
+        setFeedback("服务端模拟账户已重置；历史事件仍可回放。", "success");
+        void refreshAudit();
+      } catch (error) { setFeedback(error.message || "账户重置失败", "error"); }
+    });
+    const replayButton = $("replayPaperBtn");
+    if (replayButton) replayButton.addEventListener("click", verifyPaperReplay);
     $("exportTrades").addEventListener("click", exportTrades);
     window.addEventListener("resize", () => { if (state.chart) state.chart.applyOptions({ width: $("priceChart").clientWidth, height: $("priceChart").clientHeight }); else drawFallbackChart(); });
   }
@@ -593,8 +650,6 @@
     state.book = { bids: snapshot.bids, asks: snapshot.asks };
     state.bookUpdatedAt = Date.now();
     renderBook();
-    const updates = window.NRPaper.processOpenOrders(state.account, state.symbol, state.book, marks());
-    if (updates.length) persist("open-order-state-change");
     renderAccount();
   }
 
@@ -746,10 +801,12 @@
     const a = document.createElement("a"); a.href = url; a.download = "night-researcher-paper-trades.csv"; a.click(); URL.revokeObjectURL(url);
   }
   async function main() {
-    bindControls(); initChart(); renderAccount(); await refreshSnapshot(); await syncPaperLedger(); await refreshAudit();
+    bindControls(); initChart(); renderAccount(); await refreshSnapshot(); await bootstrapPaperEngine(); await refreshAudit();
     await Promise.allSettled([refreshKlines(), refreshDepth()]); connectSocket(); await loadResearchGates();
     state.restTimer = setInterval(() => { refreshSnapshot(); if (!state.socketReady) restFallback(); }, 12000);
     setInterval(() => { if (state.socketReady) refreshDepth().catch(() => {}); }, 15000);
+    state.serverPollTimer = setInterval(() => { void processServerLimitOrders(); }, 2500);
+    setInterval(() => { void refreshServerAccount(); }, 15000);
   }
   document.addEventListener("DOMContentLoaded", () => { main().catch(err => { setConnection("初始化失败", true); console.error(err); }); });
 })();
