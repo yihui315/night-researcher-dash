@@ -114,7 +114,7 @@ P1 数据接入顺序：
 - KELLY 与 TAKER 是确定性程序，不调用 LLM。
 - 当前六角色共享同一组 Provider/Model 配置；未来在 JEV Provider Center 按 Agent 映射不同模型。
 - 当前是串行角色提示词工作流，不应宣传为六个独立模型/自治 Agent 集群。
-- 当前策略报告没有策略通过全部放行门槛，因此 KELLY 输出应为 0 仓位，TAKER 应阻断。
+- KELLY 的 Wilson 下界 + 1/4 Kelly 计算函数和 TAKER 提案函数已有单元测试；但 Agent API 当前刻意向 KELLY 传入 `null`，不接受浏览器提交的策略统计，原因是服务端可信研究账本尚未建设。因此当前线上流程 KELLY 恒为 0，TAKER 恒阻断；未来接入服务端签名/版本化研究结果后才能解锁。
 
 ### Layer 4 — 独立验证、风险与执行
 
@@ -222,7 +222,7 @@ Live Trading：
 - Provider Center 从交易页侧栏移到首屏主区域，并增加顶部锚点入口。
 - Qwen allowlist 加入 Qwen3-Coder-Next、Qwen3-Coder-Plus、Qwen3.8-Max 等当前 Model Studio 模型。
 - 修复 WebSocket close handler 中未定义的 `symbol` 引用，并加入 generation guard 防止旧连接覆盖新交易对。
-- 新增六角色研究 API；四个 LLM 角色串行输出结构化 JSON，KELLY/TAKER 由确定性代码运行。
+- 新增六角色研究 API；四个 LLM 角色串行输出结构化 JSON，KELLY/TAKER 由确定性代码运行；KELLY 目前只接受未来的服务端可信研究指标，不接受客户端快照。
 - 新增 Kelly Wilson 下界、1/4 Kelly、10% 上限；未通过样本/OOS 门禁时仓位为零。
 - TAKER 只能返回 proposal，不能调用 paper/live order。
 - 新增严格 Walk-forward、CRC20 数值精度/索引同步、六角色/Kelly/TAKER 测试和浏览器 E2E；真实 Provider Key 联调仍需用户在界面中输入并点击连接测试。
