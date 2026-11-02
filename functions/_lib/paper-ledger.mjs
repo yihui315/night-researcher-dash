@@ -159,10 +159,16 @@ export async function handlePaperLedger(request, env) {
     const after = Math.max(0, Math.floor(Number(url.searchParams.get("after") || 0)));
     const limit = Math.min(100, Math.max(1, Math.floor(Number(url.searchParams.get("limit") || 50))));
     if (!Number.isFinite(after)) return json({ ok: false, error: "after 游标无效" }, 400);
-    const result = await env.PAPER_DB.prepare(
-      "SELECT seq, event_id, event_type, payload_json, created_at FROM paper_events WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?"
-    ).bind(sessionId, after, limit).all();
-    const events = (result.results || []).map(row => {
+    const latestOnly = url.searchParams.get("latest") === "1";
+    const query = latestOnly
+      ? "SELECT seq, event_id, event_type, payload_json, created_at FROM paper_events WHERE session_id = ? ORDER BY seq DESC LIMIT ?"
+      : "SELECT seq, event_id, event_type, payload_json, created_at FROM paper_events WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?";
+    const statement = latestOnly
+      ? env.PAPER_DB.prepare(query).bind(sessionId, limit)
+      : env.PAPER_DB.prepare(query).bind(sessionId, after, limit);
+    const result = await statement.all();
+    const rows = latestOnly ? (result.results || []).slice().reverse() : (result.results || []);
+    const events = rows.map(row => {
       let payload = null;
       try { payload = JSON.parse(row.payload_json); } catch (_) {}
       return { seq: row.seq, eventId: row.event_id, eventType: row.event_type, payload, createdAt: row.created_at };
