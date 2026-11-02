@@ -96,6 +96,11 @@
       return requestLedger("?after=" + cursor + "&limit=" + pageSize, { method: "GET" });
     }
 
+    async function readLatestEvents(limit) {
+      const pageSize = Math.min(100, Math.max(1, Math.floor(Number(limit || 50))));
+      return requestLedger("?latest=1&limit=" + pageSize, { method: "GET" });
+    }
+
     async function latestSnapshot() {
       const data = await requestLedger("?latest=1&eventType=paper.account.snapshot&limit=1", { method: "GET" });
       const events = Array.isArray(data.events) ? data.events : [];
@@ -114,6 +119,7 @@
       appendSnapshot,
       latestSnapshot,
       readEvents,
+      readLatestEvents,
       getStatus: () => ({ ready, unavailable, lastError })
     };
   }
