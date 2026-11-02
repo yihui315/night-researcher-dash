@@ -30,11 +30,15 @@ if (host) {
     ring.position.copy(positions[symbol]); ring.rotation.x = Math.PI / 2.8; group.add(ring);
   });
   const symbols = Object.keys(positions);
+  const edges = {};
   for (let i = 0; i < symbols.length; i++) {
     for (let j = i + 1; j < symbols.length; j++) {
-      const points = [positions[symbols[i]], positions[symbols[j]]];
-      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), new THREE.LineBasicMaterial({ color: 0x385777, transparent: true, opacity: 0.42 }));
+      const a = symbols[i], b = symbols[j];
+      const points = [positions[a], positions[b]];
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), new THREE.LineBasicMaterial({ color: 0x385777, transparent: true, opacity: 0.12 }));
+      line.userData = { type: "price-correlation", pair: [a, b], correlation: null, window: "90d_4h" };
       group.add(line);
+      edges[a + "|" + b] = line;
     }
   }
   const starGeo = new THREE.BufferGeometry(), starPositions = [];
@@ -64,7 +68,58 @@ if (host) {
       mesh.scale.setScalar(scale);
     });
   }
-  window.NRMarket3D = { updateAssets };
+  function updateCorrelation(matrix) {
+    Object.keys(edges).forEach(key => {
+      const line = edges[key];
+      const value = matrix && Number.isFinite(matrix[key]) ? matrix[key] : null;
+      line.userData.correlation = value;
+      line.material.opacity = value === null ? 0.10 : 0.12 + Math.abs(value) * 0.68;
+      line.material.color.setHex(value === null ? 0x385777 : value >= 0 ? 0x62a9ff : 0xf0b90b);
+    });
+  }
+  function correlation(a, b) {
+    const n = Math.min(a.length, b.length);
+    if (n < 30) return null;
+    const ax = a.slice(0, n), bx = b.slice(0, n);
+    const am = ax.reduce((sum, value) => sum + value, 0) / n;
+    const bm = bx.reduce((sum, value) => sum + value, 0) / n;
+    let covariance = 0, av = 0, bv = 0;
+    for (let i = 0; i < n; i++) {
+      const da = ax[i] - am, db = bx[i] - bm;
+      covariance += da * db; av += da * da; bv += db * db;
+    }
+    return av > 0 && bv > 0 ? covariance / Math.sqrt(av * bv) : null;
+  }
+  async function loadCorrelation() {
+    try {
+      const histories = await Promise.all(symbols.map(async symbol => {
+        const url = "https://data-api.binance.vision/api/v3/klines?symbol=" + symbol + "&interval=4h&limit=540";
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("market history unavailable");
+        const rows = await response.json();
+        return [symbol, new Map(rows.map(row => [Number(row[0]), Number(row[4])]))];
+      }));
+      const maps = Object.fromEntries(histories);
+      const matrix = {};
+      for (let i = 0; i < symbols.length; i++) {
+        for (let j = i + 1; j < symbols.length; j++) {
+          const a = symbols[i], b = symbols[j];
+          const times = Array.from(maps[a].keys()).filter(time => maps[b].has(time)).sort((x, y) => x - y);
+          const ra = [], rb = [];
+          for (let k = 1; k < times.length; k++) {
+            const pa0 = maps[a].get(times[k - 1]), pa1 = maps[a].get(times[k]);
+            const pb0 = maps[b].get(times[k - 1]), pb1 = maps[b].get(times[k]);
+            if (pa0 > 0 && pb0 > 0) { ra.push(pa1 / pa0 - 1); rb.push(pb1 / pb0 - 1); }
+          }
+          matrix[a + "|" + b] = correlation(ra, rb);
+        }
+      }
+      updateCorrelation(matrix);
+    } catch (_) { updateCorrelation(null); }
+  }
+  window.NRMarket3D = { updateAssets, updateCorrelation, loadCorrelation };
+  loadCorrelation();
+  if (window.NRTradingGetSnapshot) updateAssets(window.NRTradingGetSnapshot().tickers || {});
   function resize() { const w = host.clientWidth, h = host.clientHeight; camera.aspect = w / Math.max(1, h); camera.updateProjectionMatrix(); renderer.setSize(w, h); }
   window.addEventListener("resize", resize);
   function animate() { requestAnimationFrame(animate); if (!dragging) group.rotation.y += 0.0015; renderer.render(scene, camera); }
