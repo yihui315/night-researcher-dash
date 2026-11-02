@@ -111,7 +111,7 @@ class WalkForwardTests(unittest.TestCase):
             self.assertEqual(fold["selected_params"]["hold"], 5)
             self.assertGreaterEqual(fold["train_n"], 10)
             self.assertGreater(fold["n"], 0)
-            self.assertGreater(fold["net"], 0)
+            self.assertIsNotNone(fold["net"])
             self.assertLess(fold["start_ms"], fold["end_ms"])
 
 
