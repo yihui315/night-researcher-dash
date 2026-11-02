@@ -23,6 +23,7 @@ export class TradingApiError extends Error {
   requestId: string | null;
 }
 export function createTradingApi(options?: TradingApiOptions): {
+  getProviderHealth(): Promise<Record<string, unknown>>;
   getHealth(): Promise<Record<string, unknown>>;
   getMarketSnapshot(params?: MarketSnapshotParams): Promise<Record<string, unknown>>;
   getOrderBook(input: { venue?: string; symbol: string }): Promise<Record<string, unknown>>;
