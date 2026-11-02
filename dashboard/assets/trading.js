@@ -75,6 +75,13 @@
       setLedgerStatus("本地缓存 · 云端同步失败", "warning");
     }
   }
+  window.NRTradingAppendLedgerEvent = function (eventType, payload) {
+    if (!state.ledger) return Promise.resolve({ ok: false, available: false });
+    const id = typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : "evt-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 14);
+    return state.ledger.appendEvent({ eventId: id, eventType, payload: payload || {} });
+  };
   function setConnection(text, offline) {
     const el = $("connectionStatus"); if (!el) return;
     el.textContent = text; el.classList.toggle("offline", !!offline);
@@ -112,7 +119,7 @@
     state.bookUpdatedAt = Date.now();
     renderBook();
     const updates = window.NRPaper.processOpenOrders(state.account, state.symbol, state.book, marks());
-    if (updates.length) { persist(); setFeedback("限价委托状态已更新：" + updates.map(x => x.id + " " + x.status).join("、"), "success"); }
+    if (updates.length) { persist("open-order-fill-or-reject"); setFeedback("限价委托状态已更新：" + updates.map(x => x.id + " " + x.status).join("、"), "success"); }
     updateEstimate();
     renderAccount();
   }
@@ -310,7 +317,7 @@
     }));
     $("submitOrder").addEventListener("click", submitOrder);
     $("openOrdersBody").addEventListener("click", e => { const b = e.target.closest("[data-cancel]"); if (!b) return; if (window.NRPaper.cancelOrder(state.account, b.dataset.cancel)) { persist("order-cancelled"); setFeedback("已撤销模拟委托 " + b.dataset.cancel, "success"); } });
-    $("resetAccount").addEventListener("click", () => { if (!confirm("确定清空当前浏览器中的全部模拟持仓、挂单和成交记录，并恢复 $10,000 初始资金？")) return; state.account = window.NRPaper.resetAccount(); persist("account-reset"); setFeedback("模拟账户已重置。", "success"); });
+    $("resetAccount").addEventListener("click", () => { if (!confirm("确定将模拟账户重置为 $10,000？历史服务端事件记录仍会保留。")) return; state.account = window.NRPaper.resetAccount(); persist("account-reset"); setFeedback("模拟账户已重置。", "success"); });
     $("exportTrades").addEventListener("click", exportTrades);
     window.addEventListener("resize", () => { if (state.chart) state.chart.applyOptions({ width: $("priceChart").clientWidth, height: $("priceChart").clientHeight }); else drawFallbackChart(); });
   }
