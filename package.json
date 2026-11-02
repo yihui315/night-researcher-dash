@@ -5,7 +5,9 @@
   "description": "Night Researcher quantitative research and paper trading desk",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "d1:migrate": "node scripts/d1-migrate.mjs",
+    "d1:verify": "node scripts/d1-verify.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2"
