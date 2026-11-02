@@ -3,6 +3,8 @@
 状态：接口与集成方案基线；**尚未写入本地 JEV 源码**。  
 目标：把 Night Researcher 作为 JEV Command Center 的量化交易模块，而不是维护第二套独立控制台。
 
+OpenAPI 契约：`docs/jev-trading-openapi.yaml`（规划接口，当前尚未实现）。
+
 ## 1. 集成原则
 
 - 复用 JEV 当前 React 19 + Vite + Three.js 应用、路由、主题、布局、权限、Provider Center。
