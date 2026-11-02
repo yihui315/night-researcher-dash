@@ -4,11 +4,7 @@ const MAX_BODY_BYTES = 180_000;
 const MAX_EVENT_BYTES = 150_000;
 const MAX_EVENTS_PER_SESSION = 10_000;
 const ALLOWED_EVENTS = new Set([
-  "paper.account.snapshot",
-  "paper.order.created",
-  "paper.order.updated",
-  "paper.order.cancelled",
-  "paper.account.reset"
+  "paper.account.snapshot"
 ]);
 const TRUSTED_EVENTS = new Set([
   "agent.run.started",
