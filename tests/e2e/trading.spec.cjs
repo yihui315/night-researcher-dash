@@ -131,3 +131,21 @@ test("AI Provider Center is visible and the six-agent flow never persists keys",
   const stored = await page.evaluate(() => JSON.stringify(localStorage));
   expect(stored).not.toContain("mm-team-browser-test-key-123456");
 });
+
+test("dedicated AI settings page is directly discoverable from trading header", async ({ page }) => {
+  await expect(page.locator('a.ai-nav-link')).toHaveAttribute("href", "ai-settings.html");
+  await page.locator('a.ai-nav-link').click();
+  await expect(page).toHaveURL(/ai-settings\.html$/);
+  await expect(page.getByRole("heading", { name: "AI 模型与 API 设置" })).toBeVisible();
+  await expect(page.locator("#minimaxApiKey")).toBeVisible();
+  await page.locator("#aiProvider").selectOption("qwen");
+  await expect(page.locator("#qwenFields")).toBeVisible();
+  await expect(page.locator("#qwenApiKey")).toBeVisible();
+  await expect(page.locator("#qwenWorkspaceId")).toBeVisible();
+  await page.locator("#qwenApiKey").fill("sk-settings-browser-test-key-123456");
+  await page.locator("#qwenWorkspaceId").fill("ws-settings-test");
+  await page.locator("#aiTest").click();
+  await expect(page.locator("#aiStatus")).toContainText("连接成功");
+  const stored = await page.evaluate(() => JSON.stringify(localStorage) + JSON.stringify(sessionStorage));
+  expect(stored).not.toContain("sk-settings-browser-test-key-123456");
+});
