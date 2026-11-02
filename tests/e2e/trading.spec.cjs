@@ -70,6 +70,32 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/agents/research", async route => {
     const payload = route.request().postDataJSON();
     const valid = !!payload.apiKey && !!payload.snapshot;
+    const startedAt = new Date().toISOString();
+    const completedAt = new Date().toISOString();
+    const outputs = {
+      SPOTTER: { title: "机会发现", opportunities: [] },
+      PRIOR: { title: "市场先验", regime: "unknown", evidence: [] },
+      EDGE: { title: "优势验证", verdict: "WATCH", invalidation: "OOS 失效" },
+      KELLY: { status: "BLOCKED", allocationPct: 0 },
+      TAKER: { status: "BLOCKED", autoSubmit: false },
+      CLOSER: { title: "退出与复盘", decision: "HOLD_RESEARCH", exit_conditions: [] }
+    };
+    if (valid) {
+      paperEvents.push({
+        seq: paperEvents.length + 1,
+        eventId: "agent.run.started:" + payload.runId,
+        eventType: "agent.run.started",
+        payload: { runId: payload.runId, provider: payload.provider, model: payload.model, promptVersion: "nr-agent-research-v1" },
+        createdAt: startedAt
+      });
+      paperEvents.push({
+        seq: paperEvents.length + 1,
+        eventId: "agent.run.completed:" + payload.runId,
+        eventType: "agent.run.completed",
+        payload: { runId: payload.runId, snapshotHash: "a".repeat(64), outputs, usage: { total_tokens: 60 } },
+        createdAt: completedAt
+      });
+    }
     await route.fulfill({
       status: valid ? 200 : 400,
       contentType: "application/json",
@@ -80,18 +106,11 @@ test.beforeEach(async ({ page }) => {
         provider: payload.provider,
         requestedModel: payload.model,
         promptVersion: "nr-agent-research-v1",
-        startedAt: new Date().toISOString(),
-        completedAt: new Date().toISOString(),
+        startedAt,
+        completedAt,
         durationMs: 1,
         roles: ["SPOTTER", "PRIOR", "EDGE", "KELLY", "TAKER", "CLOSER"],
-        outputs: {
-          SPOTTER: { title: "机会发现", opportunities: [] },
-          PRIOR: { title: "市场先验", regime: "unknown", evidence: [] },
-          EDGE: { title: "优势验证", verdict: "WATCH", invalidation: "OOS 失效" },
-          KELLY: { status: "BLOCKED", allocationPct: 0 },
-          TAKER: { status: "BLOCKED", autoSubmit: false },
-          CLOSER: { title: "退出与复盘", decision: "HOLD_RESEARCH", exit_conditions: [] }
-        },
+        outputs,
         usage: { total_tokens: 60 },
         safety: { autoExecution: false, note: "无自动下单权限" }
       } : { error: "missing API key or snapshot" })
