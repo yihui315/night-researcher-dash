@@ -1,6 +1,6 @@
 import unittest
 
-from backtest_engine import Context, simulate, walk_forward_oos
+from backtest_engine import Context, simulate, walk_forward_oos, _summarize
 
 
 class FakeContext:
@@ -81,6 +81,29 @@ class TrainableTrendStrategy:
             self.position = "FLAT"
             return "FLAT"
         return "HOLD"
+
+
+
+class ResearchMetricTests(unittest.TestCase):
+    def test_confidence_sharpe_monte_carlo_and_slippage_metrics_are_present(self):
+        trades = [
+            {"ret": 0.02, "gross_ret": 0.023, "entry_i": 0, "exit_i": 1, "regime": "趋势"},
+            {"ret": -0.01, "gross_ret": -0.007, "entry_i": 2, "exit_i": 3, "regime": "横盘"},
+            {"ret": 0.015, "gross_ret": 0.018, "entry_i": 4, "exit_i": 5, "regime": "趋势"},
+            {"ret": -0.005, "gross_ret": -0.002, "entry_i": 6, "exit_i": 7, "regime": "横盘"},
+        ]
+        bars = [{"t": i * 3600000, "o": 100, "h": 101, "l": 99, "c": 100, "v": 1} for i in range(8)]
+        result = _summarize(trades, [1.0, 1.02, 1.0098, 1.025, 1.03], 4, bars)
+        self.assertIsNotNone(result["insample"]["win_rate_ci95"])
+        self.assertIsNotNone(result["insample"]["expectancy"])
+        self.assertIn("sharpe_per_trade", result["insample"])
+        self.assertIn("sortino_per_trade", result["insample"])
+        self.assertEqual(result["insample"]["risk_metric_basis"], "per-trade returns; not annualized")
+        self.assertEqual(result["monte_carlo"]["full"]["simulations"], 1000)
+        self.assertEqual(result["monte_carlo"]["full"]["status"], "ESTIMATE")
+        slippage = result["slippage_sensitivity"]
+        self.assertEqual([x["extra_slippage_bps_per_side"] for x in slippage], [0, 5, 10, 20, 50])
+        self.assertTrue(all(slippage[i]["net_return"] >= slippage[i + 1]["net_return"] for i in range(len(slippage) - 1)))
 
 
 class WalkForwardTests(unittest.TestCase):
