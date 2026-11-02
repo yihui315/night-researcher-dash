@@ -149,3 +149,12 @@ test("dedicated AI settings page is directly discoverable from trading header", 
   const stored = await page.evaluate(() => JSON.stringify(localStorage) + JSON.stringify(sessionStorage));
   expect(stored).not.toContain("sk-settings-browser-test-key-123456");
 });
+
+test("loads the deterministic depth sequence engine before the live trading client", async ({ page }) => {
+  const loaded = await page.evaluate(() => ({
+    create: typeof window.NRDepthBook?.create,
+    applyDiff: typeof window.NRDepthBook?.applyDiff,
+    trading: typeof window.NRTradingSelectSymbol
+  }));
+  expect(loaded).toEqual({ create: "function", applyDiff: "function", trading: "function" });
+});
