@@ -2,6 +2,20 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createTradingApi, TradingApiError } = require("../integration/jev/tradingApi.mjs");
 
+test("JEV adapter can probe the existing provider health API independently of trading routes", async () => {
+  const calls = [];
+  const api = createTradingApi({
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify({ status: "ok", provider_mode: "REAL" }), { status: 200 });
+    }
+  });
+  const health = await api.getProviderHealth();
+  assert.equal(health.status, "ok");
+  assert.equal(calls[0].url, "/api/health");
+  assert.equal(calls[0].init.credentials, "same-origin");
+});
+
 test("JEV adapter uses same-origin routes and never sends provider credentials", async () => {
   const calls = [];
   const api = createTradingApi({
