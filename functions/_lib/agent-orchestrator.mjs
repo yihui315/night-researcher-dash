@@ -200,7 +200,9 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat) {
     model: body.model,
     apiKey: body.apiKey,
     region: body.region,
-    workspaceId: body.workspaceId
+    workspaceId: body.workspaceId,
+    thinkingMode: body.provider === "minimax" ? "disabled" : undefined,
+    maxTokens: 4096
   };
 
   const outputs = {};
