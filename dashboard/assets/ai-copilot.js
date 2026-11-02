@@ -5,12 +5,6 @@
   const conversation = [];
   let busy = false;
 
-  function logResearchEvent(eventType, payload) {
-    const append = window.NRTradingAppendLedgerEvent;
-    if (typeof append !== "function") return;
-    Promise.resolve(append(eventType, payload || {})).catch(() => {});
-  }
-
   function setStatus(text, kind) {
     const el = $("aiStatus");
     if (!el) return;
@@ -176,7 +170,6 @@
     const runId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "run-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
     const snapshot = marketSnapshot();
     const startedAt = new Date().toISOString();
-    logResearchEvent("agent.run.started", { runId, provider: config.provider, model: config.model, promptVersion: "nr-agent-research-v1", startedAt, snapshot });
     $("aiTeamRun").disabled = true;
     $("aiTest").disabled = true;
     $("aiRun").disabled = true;
@@ -195,7 +188,6 @@
       });
       const data = await response.json();
       if (!response.ok || !data.ok) {
-        logResearchEvent("agent.run.failed", { runId: data.runId || runId, snapshotHash: data.snapshotHash || null, provider: config.provider, model: config.model, failedAgent: data.agent || null, error: data.error || "研究请求失败", providerErrorCode: data.providerErrorCode || null, finishReason: data.finishReason || null, partial: data.partial || {}, completedAt: new Date().toISOString() });
         $("aiTeamStatus").textContent = "流程未完成";
         $("aiTeamStatus").className = "small-pill ai-status error";
         $("aiTeamOutput").textContent = "流程中止，未生成订单。";
@@ -203,7 +195,6 @@
         if (data.partial) appendMessage("assistant", "已完成的角色结果：\n" + JSON.stringify(data.partial, null, 2));
         return;
       }
-      logResearchEvent("agent.run.completed", { runId: data.runId || runId, snapshotHash: data.snapshotHash || null, provider: data.provider || config.provider, model: data.requestedModel || config.model, promptVersion: data.promptVersion || "nr-agent-research-v1", startedAt: data.startedAt || startedAt, completedAt: data.completedAt || new Date().toISOString(), durationMs: data.durationMs || null, usage: data.usage || {}, outputs: data.outputs || {}, safety: data.safety || {} });
       const order = ["SPOTTER", "PRIOR", "EDGE", "KELLY", "TAKER", "CLOSER"];
       order.forEach(role => {
         if (data.outputs && data.outputs[role]) appendMessage("assistant", role + " · " + (data.outputs[role].title || "研究角色") + "\n" + JSON.stringify(data.outputs[role], null, 2));
@@ -213,7 +204,6 @@
       $("aiTeamOutput").textContent = "六角色流程完成；逐角色结构化结果已写入下方研究记录。TAKER 未自动创建订单。";
       appendMessage("assistant", "安全闸门：" + (data.safety && data.safety.note || "没有自动执行权限") + "\nToken 用量：" + JSON.stringify(data.usage || {}));
     } catch (error) {
-      logResearchEvent("agent.run.failed", { runId, provider: config.provider, model: config.model, error: error.message || "网络请求失败", completedAt: new Date().toISOString() });
       $("aiTeamStatus").textContent = "连接失败";
       $("aiTeamStatus").className = "small-pill ai-status error";
       $("aiTeamOutput").textContent = "连接失败，未生成订单。";
