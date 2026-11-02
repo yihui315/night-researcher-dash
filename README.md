@@ -115,9 +115,9 @@ class MyStrategy:
 - 这正是框架价值：**不美化、不编造**，跑不赢就标未过，OOS 不足就拒放行。
 - **新增第四关 g4_excess（主放行门槛）**：策略须相对买入持有为正才可通过（详见 §10）。BTC 样本内 −7.45% / 买入持有 +11.90% → 超额为负 → 已被正确判负，不再被「扛得住」误导。
 
-## 8. 交叉验证结论（2026-11-01 跑，关键修正）
+## 8. 历史交叉验证快照（2026-11-01；不是当前运行结果）
 
-引入 `BRC20_RSI_MR`（高频）做跨资产/跨周期/跨 vintage 验证后，**推翻了单看样本内的"BRC20 暴利"幻觉**：
+以下数值仅是 2026-11-01 的历史研究快照。当前 `run_research.py` 已改为每次运行动态计算交叉验证，不应将本节数字当作 2026-11-02 的最新结果。
 
 - **粒度反转（最关键）**：ORDI 的 BRC20_RSI_MR 样本内 **4h +186.76% 但 1d −57.76%**；1000SATS **4h −32.59% 但 1d +17.68%**。两代币在 4h/1d 上结论**方向相反** → 盈利高度依赖时间粒度，是典型的**粒度/参数过拟合**信号，非可迁移 edge。
 - **跨 vintage 不一致**：ORDI 三窗 OOS 净收益 +75.6% / +45.4% / −14.7%（2正1负）；SATS 三窗 +5.5% / +34.5% / −31.9%（2正1负），正负交替，稳健性不成立。
@@ -176,14 +176,15 @@ class MyStrategy:
 当前模拟账户数据仅保存在打开终端的浏览器 localStorage，清除浏览器数据会清空账户；跨设备同步和服务端账户账本属于下一阶段。此版本不连接真实交易所账户，不接受交易 API Key。
 
 
-## 13. AI 研究副驾驶与浏览器联调
+## 13. AI Provider Center 与六角色研究流程
 
-- `dashboard/trading.html` 新增 MiniMax M3 / Qwen Model Studio API 输入界面、连接测试和研究分析窗口；另有“当前盘口模拟自检”，使用公开盘口在临时账户中做买卖往返。
+- `dashboard/trading.html` 首屏顶部新增独立可见的 AI Provider Center（锚点 `#aiProviderCenter`），从首页也可直接点击“AI API 配置”；包括 MiniMax M3 / Qwen Model Studio API 输入、连接测试、普通 AI 分析、六 Agent 研究流程和独立模拟往返自检。
 - `functions/api/ai/chat.js` 是 Cloudflare Pages 同站 API；`functions/_lib/ai-core.mjs` 负责校验和转发。
 - API Key 仅在当前页面内存中保留，按用户点击发起请求时经 HTTPS 发送到同站函数，再转发至所选模型服务商；应用不写入 localStorage、Cookie、Git 或日志。刷新页面后需要重新输入。
 - MiniMax：模型 `MiniMax-M3`；中国站 `https://api.minimaxi.com/v1`、国际站 `https://api.minimax.io/v1`，API Key 与区域必须匹配。
-- Qwen：使用 Model Studio 通用 API Key（`sk-`）和与密钥同区域的 Workspace ID；默认模型可选 `qwen3.7-plus`、`qwen3.8-max`、`qwen3.6-plus`，默认 `qwen3.7-plus`（具备代码与研究能力）。
+- Qwen：使用 Model Studio 通用 API Key（`sk-`）和与密钥同区域的 Workspace ID；默认 `qwen3-coder-next`，同时支持 `qwen3-coder-plus`、`qwen3.8-max`、`qwen3.7-plus`、`qwen3.6-plus`。
 - **不要把 Qwen Coding Plan 的 `sk-sp-` 密钥填入网页**。该套餐仅供 Qwen Code 等交互式编程工具使用，不用于本应用后端。
+- 六角色顺序：SPOTTER → PRIOR → EDGE → KELLY → TAKER → CLOSER。SPOTTER/PRIOR/EDGE/CLOSER 由模型分别调用；KELLY 使用 95% Wilson 胜率下界 + 1/4 Kelly + 10% 上限；TAKER 只生成提案。没有已验证历史/OOS 指标时 Kelly=0；TAKER 不自动创建模拟单或真实订单。
 - AI 只生成研究意见，不决定策略是否放行，不生成真实交易指令。研究门禁仍由程序计算。
 - 收益研究与模拟验收路线见 `盈利研究计划.md`。
 
@@ -196,3 +197,13 @@ python -m unittest discover -s tests -p "test_*.py"
 ```
 
 浏览器 E2E 使用 Playwright + 模拟 Binance 公共行情响应，验证页面行情加载、盘口驱动的模拟成交、单笔风险拒单、MiniMax/Qwen 输入界面和密钥不落地。该测试不替代用户输入真实 API Key 后的供应商连通性测试。
+
+## 14. 六层 AI Quant Trading OS 架构与当前审计
+
+- 架构审计：`docs/AI_QUANT_TRADING_OS_ARCHITECTURE.md`
+- JEV React 19 / Vite / Three.js 集成合同：`docs/JEV_TRADING_DESK_INTEGRATION.md`
+- 当前严格 Walk-forward：每个 90 天 fold 只用验证开始前的数据选择参数，再用独立策略实例验证；训练期无正 edge 时不强行选参。
+- CRC20/LEAF：新增 `fetch_crc20_status`、`fetch_crc20_stats`、`fetch_crc20_history`、`fetch_crc20_market_snapshot`；marketplace sale 与 AXBT/LEAF pool swap 分开，不把它们合成一个虚假的 latest_trade。
+- CRC20 公开 API 没有可验证的完整订单簿，因此 best bid/ask、6h VWAP、统一 latest_trade 保持 unknown；需要和 `https://crc.garden/activity`、Bitcoin 区块/交易证据交叉核验。
+- 当前分支仍是 Night Researcher 预览原型；JEV 本地 React 前端、Provider Center DPAPI、4779 后端和六个 React 页面尚未真正集成。必须在可访问的 JEV 源码上完成，不宣称已完成。
+
