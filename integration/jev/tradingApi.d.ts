@@ -24,6 +24,9 @@ export class TradingApiError extends Error {
 }
 export function createTradingApi(options?: TradingApiOptions): {
   getProviderHealth(): Promise<Record<string, unknown>>;
+  listProviders(): Promise<Record<string, unknown>>;
+  probeProvider(providerId: string): Promise<Record<string, unknown>>;
+  listProviderModels(providerId: string): Promise<Record<string, unknown>>;
   getHealth(): Promise<Record<string, unknown>>;
   getMarketSnapshot(params?: MarketSnapshotParams): Promise<Record<string, unknown>>;
   getOrderBook(input: { venue?: string; symbol: string }): Promise<Record<string, unknown>>;
