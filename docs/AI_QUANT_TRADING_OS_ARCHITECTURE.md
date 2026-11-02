@@ -65,7 +65,7 @@ CEX / DEX / Bitcoin L1 / BRC20 / RUNES / CRC20
 
 | 数据域 | 当前实现 | 审计结论 |
 |---|---|---|
-| BTC/ETH/ORDI/1000SATS 现货 | Binance 公共 REST + WebSocket ticker/depth20/trade | 已有基础连接；浏览器 CI 用模拟数据，不等于生产链路已验收 |
+| BTC/ETH/ORDI/1000SATS 现货 | Binance 公共 REST + WebSocket ticker/diff-depth/trade；REST 1000 档快照桥接、update ID 连续性检查、过期事件丢弃、序列缺口重同步 | 代码已实现并有纯单元测试；仍需真实 WebSocket 线上验收；交易所过滤器和多 venue 尚未完成 |
 | K 线 | Binance REST，1m/15m/1h/4h/1d | 已有 |
 | 订单簿 | Binance depth20 部分深度流 + 定时 REST 快照 | 可做演示撮合；尚非 diff-depth 序列重建 |
 | 永续资金费率 | `connectors_extra.py` Bybit/Binance 尝试 | 当前数据可能 unknown；未建立稳定验收 |
@@ -92,7 +92,7 @@ P1 数据接入顺序：
 
 重要限制：
 - 当前分数是解释性市场状态观察，不是已验证交易信号。
-- 当前 depth20 WebSocket 是部分深度快照，不是完整 diff-depth order book replay。
+- 当前已从 `@depth20@100ms` 升级为 `@depth@100ms` diff-depth；用 REST 1000 档快照建立基线，按 `U/u` 更新 ID 桥接、排序和应用增量，过期事件丢弃，发现序列缺口则重新取快照。仍需线上长时间验证断线重连、限频和跨交易对切换。
 - 需要加入数据新鲜度门槛、成交量异常、spread/depth、冲击成本、波动状态和链上事件标准化。
 - 3D 当前节点展示四个观察资产，连线新增 90 天 4h 收益相关性（由 Binance K 线计算）；这不是资金流，资金流边仍待接入链上/DEX 成交与池子储备证据。
 
