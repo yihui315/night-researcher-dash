@@ -255,7 +255,7 @@ class Context:
 SIDE_COST = 0.0015  # 单边 0.15% (手续费0.1% + 滑点0.05%)
 
 
-def simulate(strategy, ctx, oos_split_idx):
+def simulate(strategy, ctx, oos_split_idx, start_idx=0, end_idx=None):
     """
     事件驱动回测：收盘产生信号，下一根 K 线开盘成交；止损使用当根 OHLC 检查。
     每次调用克隆策略实例，避免回测/敏感性分析之间发生状态污染。
@@ -263,6 +263,8 @@ def simulate(strategy, ctx, oos_split_idx):
     """
     bars = ctx.bars
     n = len(bars)
+    start_idx = max(0, min(n, int(start_idx or 0)))
+    end_idx = n if end_idx is None else max(start_idx, min(n, int(end_idx)))
     params = dict(getattr(strategy, "params", {}) or {})
     runtime = strategy.__class__(**params)
     pos = 0
@@ -298,7 +300,8 @@ def simulate(strategy, ctx, oos_split_idx):
         runtime.entry_price = price
         runtime.entry_i = idx
 
-    for i, bar in enumerate(bars):
+    for i in range(start_idx, end_idx):
+        bar = bars[i]
         # 前一根收盘产生的信号，在本根开盘执行。
         if pending == "FLAT":
             close_position(bar["o"], i)
@@ -348,8 +351,8 @@ def simulate(strategy, ctx, oos_split_idx):
                 pending = action
 
     # 最后一根 K 线没有下一根开盘价；未平仓头寸按最后收盘价强制估值退出。
-    if pos != 0 and n:
-        close_position(bars[-1]["c"], n - 1, True)
+    if pos != 0 and end_idx > start_idx:
+        close_position(bars[end_idx - 1]["c"], end_idx - 1, True)
         equity_curve[-1] = equity_realized
     if not equity_curve:
         equity_curve = [1.0]
@@ -386,40 +389,96 @@ def _fold_stats(trades):
     return {"n": len(trades), "net": net, "win_rate": wins / len(trades)}
 
 
-def rolling_oos(strategy_cls, params, ctx, folds=3, oos_days=90):
+def walk_forward_oos(strategy_cls, ctx, param_grid, folds=3, oos_days=90, min_train_trades=10):
     """
-    多 vintage 90d 样本外滚动验证（walk-forward 风格）。
+    严格滚动 Walk-forward：
+    1. 每个 fold 的训练集只包含验证窗口开始之前的数据；
+    2. 只在训练集上跑参数网格并选择训练表现最好的组合；
+    3. 用新策略实例，在后续 90 天验证窗口从空仓开始运行；
+    4. 验证上下文在 fold 结束处截断，禁止读取未来数据。
 
-    每个 fold 是一个不重叠的 90 天窗口（自今向前推），统计该窗口内**出场**的交易。
-    因引擎指标在 idx 处仅用 <=idx 的过去数据，对不同时点重算 simulate / 重新切分
-    出场区间均不引入前视偏差，故 rolling 成立。
-
-    返回 list of dict: {fold, start_ms, end_ms, n, net, win_rate}
+    返回每个 fold 的训练样本、所选参数、独立 OOS 交易和验证指标。
     """
     dayms = 86400_000
-    now = ctx.times[-1]
-    strat = strategy_cls(**params)
-    # 用超大 oos_split_idx 使全量交易归入 insample，便于按出场 idx 手动切分 fold
-    summary = simulate(strat, ctx, len(ctx.bars) + 1)
-    trades = summary["trades"]
+    if not ctx.times:
+        return []
+    now = ctx.times[-1] + 1
     results = []
-    for f in range(folds):
-        start_ms = now - (f + 1) * oos_days * dayms
-        end_ms = now - f * oos_days * dayms
+
+    for fold in range(folds):
+        start_ms = now - (fold + 1) * oos_days * dayms
+        end_ms = now - fold * oos_days * dayms
         idx_s = _first_idx_ge(ctx.times, start_ms)
-        idx_e = _first_idx_ge(ctx.times, end_ms) if f > 0 else len(ctx.bars)
-        if idx_s is None or idx_s >= len(ctx.bars) - 5:
+        idx_e = _first_idx_ge(ctx.times, end_ms)
+        if idx_e is None:
+            idx_e = len(ctx.bars)
+        if idx_s is None or idx_s < 250 or idx_e <= idx_s:
             continue
-        fold_t = [t for t in trades if idx_s <= t["exit_i"] < idx_e]
-        st = _fold_stats(fold_t)
+
+        # 训练数据严格截断在验证窗口开始之前。
+        train_bars = ctx.bars[:idx_s]
+        train_end_ms = train_bars[-1]["t"] if train_bars else 0
+        train_fng = [point for point in ctx.fng_pts if point[0] <= train_end_ms]
+        train_ctx = Context(train_bars, train_fng)
+        train_results = grid_search(
+            strategy_cls,
+            train_ctx,
+            param_grid,
+            len(train_ctx.bars) + 1
+        )
+        eligible = [
+            item for item in train_results
+            if item["ins_n"] >= min_train_trades and item["ins_net"] > 0
+        ]
+        if not eligible:
+            results.append({
+                "fold": fold,
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "train_n": max((item["ins_n"] for item in train_results), default=0),
+                "train_net": None,
+                "selected_params": None,
+                "n": 0,
+                "net": None,
+                "win_rate": None,
+                "max_drawdown": None,
+                "status": "NO_TRAIN_EDGE",
+            })
+            continue
+
+        # 选择只依赖训练窗口；验证数据没有参与参数选择。
+        best = max(eligible, key=lambda item: item["ins_net"])
+        validation_bars = ctx.bars[:idx_e]
+        validation_end_ms = validation_bars[-1]["t"] if validation_bars else 0
+        validation_fng = [point for point in ctx.fng_pts if point[0] <= validation_end_ms]
+        validation_ctx = Context(validation_bars, validation_fng)
+
+        validation = simulate(
+            strategy_cls(**best["params"]),
+            validation_ctx,
+            idx_s,
+            start_idx=idx_s,
+            end_idx=idx_e,
+        )
+        fold_trades = [
+            trade for trade in validation["trades"]
+            if idx_s <= trade["entry_i"] < idx_e and idx_s <= trade["exit_i"] < idx_e
+        ]
+        stats = _fold_stats(fold_trades)
         results.append({
-            "fold": f,
+            "fold": fold,
             "start_ms": start_ms,
             "end_ms": end_ms,
-            "n": st["n"],
-            "net": st["net"],
-            "win_rate": st["win_rate"],
+            "train_n": best["ins_n"],
+            "train_net": best["ins_net"],
+            "selected_params": best["params"],
+            "n": stats["n"],
+            "net": stats["net"],
+            "win_rate": stats["win_rate"],
+            "max_drawdown": validation["max_drawdown"],
+            "status": "VALIDATED" if stats["n"] else "NO_OOS_TRADES",
         })
+
     return results
 
 
