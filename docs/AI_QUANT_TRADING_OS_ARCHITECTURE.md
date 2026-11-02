@@ -128,8 +128,8 @@ P1 数据接入顺序：
 现状审计：
 - 回测引擎已有事件驱动下一根 K 线开盘成交、OHLC 止损、交易成本、胜率、平均盈亏、Profit Factor、Expectancy、Payoff Ratio、Max Drawdown。
 - 已有 730 天窗口、90 天 OOS、参数网格和多个 vintage 的研究框架。
-- **当前 `rolling_oos` 先对全历史跑一次再按退出时间筛交易，不是严格独立的 walk-forward 训练/验证流程；必须重写。**
-- Sharpe/Sortino、Monte Carlo、交易级滑点/冲击回放尚未完成。
+- 本轮已将 `rolling_oos` 替换为严格 `walk_forward_oos`：每个 fold 只用验证开始前的数据选择参数，再用新策略实例在独立 90 天窗口从空仓验证；训练与验证上下文均按时间截断。
+- Sharpe/Sortino、Monte Carlo、交易级滑点/冲击回放尚未完成；walk-forward 也需要真实数据运行后的结果审查。
 - 当前策略报告中的策略均未通过全部门禁，不允许晋级。
 
 Paper Engine 当前约束：
@@ -210,7 +210,7 @@ Live Trading：
 
 | 阶段 | 验收 |
 |---|---|
-| P0 基线/回测可信 | 修复真实 walk-forward；补 Sharpe/Sortino/Monte Carlo；测试无前视 |
+| P0 基线/回测可信 | <badge>严格 Walk-forward 已实现</badge>；补 Sharpe/Sortino/Monte Carlo；持续验证无前视 |
 | P1 数据中心 | CEX depth sequence；Funding/OI/liquidations；RUNES/CRC20 代币级市场数据 |
 | P2 Paper Trading | 交易规则过滤器、部分成交、服务端 ledger、回放与幂等 |
 | P3 JEV 集成 | JEV React 19 页面、Provider Center/DPAPI、4779 API、WebSocket event bus |
@@ -224,4 +224,4 @@ Live Trading：
 - 新增六角色研究 API；四个 LLM 角色串行输出结构化 JSON，KELLY/TAKER 由确定性代码运行。
 - 新增 Kelly Wilson 下界、1/4 Kelly、10% 上限；未通过样本/OOS 门禁时仓位为零。
 - TAKER 只能返回 proposal，不能调用 paper/live order。
-- 新增单元测试和浏览器 E2E；真实 Provider Key 联调仍需用户在界面中输入并点击连接测试。
+- 新增严格 Walk-forward 单元测试、六角色/Kelly/TAKER 测试和浏览器 E2E；真实 Provider Key 联调仍需用户在界面中输入并点击连接测试。
