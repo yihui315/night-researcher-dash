@@ -122,6 +122,9 @@ export function buildTakerPlan(edge, kelly, snapshot) {
   const bestAsk = Number((book.asks || [])[0] && book.asks[0][0] || 0);
   const bestBid = Number((book.bids || [])[0] && book.bids[0][0] || 0);
 
+  if (String(edge && edge.verdict || "") !== "RESEARCH") {
+    return { status: "BLOCKED", symbol, side, autoSubmit: false, reason: "EDGE 未给出 RESEARCH 结论，TAKER 不得创建提案" };
+  }
   if (!kelly || kelly.status !== "READY" || !(kelly.allocationPct > 0)) {
     return { status: "BLOCKED", symbol, side, autoSubmit: false, reason: "KELLY 未放行仓位，TAKER 不得创建委托" };
   }
@@ -180,7 +183,7 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat) {
   }
 
   const snapshot = body.snapshot && typeof body.snapshot === "object" ? body.snapshot : null;
-  if (!snapshot || JSON.stringify(snapshot).length > 18000) return json({ error: "缺少有效市场快照或快照过大" }, 400);
+  if (!snapshot || JSON.stringify(snapshot).length > 12000) return json({ error: "缺少有效市场快照或快照过大" }, 400);
   const providerConfig = {
     provider: body.provider,
     model: body.model,
@@ -245,7 +248,7 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat) {
     }
 
     if (role.id === "EDGE") {
-      outputs.KELLY = computeFractionalKelly(snapshot.strategyMetrics);
+      outputs.KELLY = computeFractionalKelly(null); // Only a server-verified research ledger may feed Kelly; client snapshots are untrusted.
       outputs.TAKER = buildTakerPlan(outputs.EDGE, outputs.KELLY, snapshot);
     }
   }
