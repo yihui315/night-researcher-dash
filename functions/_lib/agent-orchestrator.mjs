@@ -156,12 +156,47 @@ export function buildTakerPlan(edge, kelly, snapshot) {
   };
 }
 
+function isStringArray(value, max = 12) {
+  return Array.isArray(value) && value.length <= max && value.every(item => typeof item === "string" && item.length <= 500);
+}
+
 function roleValid(role, value) {
-  if (!value) return false;
-  if (role === "SPOTTER") return Array.isArray(value.opportunities);
-  if (role === "PRIOR") return typeof value.regime === "string" && Array.isArray(value.evidence);
-  if (role === "EDGE") return typeof value.verdict === "string" && typeof value.invalidation === "string";
-  if (role === "CLOSER") return typeof value.decision === "string" && Array.isArray(value.exit_conditions);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (role === "SPOTTER") {
+    return Array.isArray(value.opportunities)
+      && value.opportunities.length <= 3
+      && value.opportunities.every(item =>
+        item && typeof item === "object"
+        && ALLOWED_SYMBOLS.has(String(item.symbol || ""))
+        && typeof item.setup === "string"
+        && isStringArray(item.evidence, 8)
+        && isStringArray(item.missing_data, 8)
+        && item.watch_only === true
+      );
+  }
+  if (role === "PRIOR") {
+    return ["risk_on", "risk_off", "range", "unknown"].includes(value.regime)
+      && isStringArray(value.evidence)
+      && isStringArray(value.counter_evidence)
+      && isStringArray(value.unknowns)
+      && (value.prior_confidence == null || (Number.isFinite(Number(value.prior_confidence)) && Number(value.prior_confidence) >= 0 && Number(value.prior_confidence) <= 1));
+  }
+  if (role === "EDGE") {
+    return ["RESEARCH", "WATCH", "REJECT"].includes(value.verdict)
+      && (value.symbol === "" || ALLOWED_SYMBOLS.has(String(value.symbol || "")))
+      && ["BUY", "SELL", "WATCH"].includes(value.side)
+      && typeof value.invalidation === "string"
+      && (value.hypothesis == null || typeof value.hypothesis === "string")
+      && isStringArray(value.costs_to_test || [])
+      && isStringArray(value.required_evidence || []);
+  }
+  if (role === "CLOSER") {
+    return ["HOLD_RESEARCH", "REJECT", "MONITOR"].includes(value.decision)
+      && isStringArray(value.exit_conditions)
+      && isStringArray(value.failure_modes || [])
+      && isStringArray(value.next_validation || [])
+      && (value.final_risk_note == null || typeof value.final_risk_note === "string");
+  }
   return false;
 }
 
