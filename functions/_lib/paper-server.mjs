@@ -32,6 +32,7 @@ function createAccount() {
     positions: {},
     orders: [],
     trades: [],
+    lastBookSequence: {},
     realizedPnl: 0,
     equityPeak: CFG.initialCash,
     dayKey: utcDay(),
@@ -362,8 +363,11 @@ function applyFill(account, order, rawFill, fillIndex, book) {
     : null;
   if (realizedPnl != null) order.realizedPnl = round(Number(order.realizedPnl || 0) + realizedPnl);
 
+  order.fillCount = Number(order.fillCount || 0) + 1;
+  const stableFillIndex = order.fillCount;
   const fill = {
-    id: "F-" + order.id + "-" + String(fillIndex).padStart(3, "0"),
+    id: "F-" + order.id + "-" + String(stableFillIndex).padStart(3, "0"),
+    fillIndex: stableFillIndex,
     orderId: order.id,
     timestamp: nowIso(),
     symbol: order.symbol,
@@ -409,8 +413,8 @@ function validateAgainstMarket(account, input, context) {
   if (!stepValid(input.quantity, filters.stepSize) || input.quantity < filters.minQty - EPS || input.quantity > filters.maxQty + EPS) {
     throw new Error("订单数量不符合交易所 LOT_SIZE 精度或范围");
   }
-  if (input.type === "LIMIT" && !stepValid(input.limitPrice, filters.tickSize)) {
-    throw new Error("限价不符合交易所 PRICE_FILTER tickSize 精度");
+  if (input.type === "LIMIT" && (!stepValid(input.limitPrice, filters.tickSize) || input.limitPrice < filters.minPrice - EPS || input.limitPrice > filters.maxPrice + EPS)) {
+    throw new Error("限价不符合交易所 PRICE_FILTER tickSize 或价格范围");
   }
   const best = input.side === "BUY" ? book.asks[0] : book.bids[0];
   const reference = input.type === "LIMIT" ? input.limitPrice : Number(best && best[0]);
@@ -463,7 +467,8 @@ function makeOrder(input, book) {
     bookReceivedAt: book ? book.receivedAt : null,
     createdAt: now,
     updatedAt: now,
-    terminalAt: null
+    terminalAt: null,
+    fillCount: 0
   };
 }
 
@@ -479,18 +484,22 @@ function simulateNewOrder(account, input, context) {
   if (input.type === "MARKET" && walk.remainingQty > EPS && walk.filledQty <= EPS) throw new Error("盘口深度不足，未产生模拟成交");
 
   if (input.type === "MARKET") {
-    if (walk.notional > reference * input.quantity * (1 + CFG.maxOrderPct) + EPS) {
-      throw new Error("盘口冲击导致成交价格异常，拒绝模拟成交");
-    }
     const pre = summarize(account, context.marks);
     if (input.side === "BUY" && (walk.notional > pre.equity * CFG.maxOrderPct + EPS ||
       pre.marketValue + reservedBuyExposure(account) + walk.notional > pre.equity * CFG.maxExposurePct + EPS)) {
       throw new Error("盘口冲击使实际成交金额超过风险上限，未模拟成交");
     }
+    if (input.side === "BUY" && walk.notional * (1 + CFG.feeRate) > pre.availableCash + EPS) {
+      throw new Error("盘口冲击导致可用 USDT 不足，未模拟成交");
+    }
+    if (input.side === "SELL") {
+      const position = account.positions[input.symbol];
+      const available = position ? Number(position.qty) - Number(position.reservedQty || 0) : 0;
+      if (walk.filledQty > available + EPS) throw new Error("可卖持仓不足，未模拟成交");
+    }
   }
 
-  let index = 1;
-  for (const rawFill of walk.fills) fills.push(applyFill(account, order, rawFill, index++, book));
+  for (const rawFill of walk.fills) fills.push(applyFill(account, order, rawFill, order.fillCount + 1, book));
 
   if (input.type === "MARKET") {
     if (walk.remainingQty > EPS) {
@@ -542,7 +551,7 @@ function rejectionOrder(input, error) {
 
 function orderRow(order, sessionId, requestHash) {
   return [
-    order.id, sessionId, order.clientOrderId, requestHash, order.confirmationId,
+    order.id, sessionId, order.clientOrderId, order.requestHash || requestHash, order.confirmationId,
     order.symbol, order.side, order.type, order.qty, order.filledQty, order.remainingQty,
     order.limitPrice, order.status, order.avgFillPrice, order.fee, order.realizedPnl,
     order.reservedCash, order.reservedQty, order.rejectionCode, order.reason,
@@ -587,13 +596,13 @@ async function commitState(db, sessionId, current, account, commandId, options =
     const values = orderRow(order, sessionId, options.requestHash || "");
     const placeholders = values.map(() => "?").join(", ");
     statements.push(db.prepare(
-      "INSERT OR REPLACE INTO paper_orders (order_id, session_id, client_order_id, request_hash, confirmation_id, symbol, side, order_type, quantity, filled_quantity, remaining_quantity, limit_price, status, average_fill_price, fee, realized_pnl, reserved_cash, reserved_quantity, rejection_code, rejection_reason, book_sequence, book_received_at, created_at, updated_at, terminal_at) SELECT " +
-      placeholders + " WHERE EXISTS (SELECT 1 FROM paper_accounts WHERE session_id = ? AND version = ? AND last_command_id = ?)"
+      "INSERT INTO paper_orders (order_id, session_id, client_order_id, request_hash, confirmation_id, symbol, side, order_type, quantity, filled_quantity, remaining_quantity, limit_price, status, average_fill_price, fee, realized_pnl, reserved_cash, reserved_quantity, rejection_code, rejection_reason, book_sequence, book_received_at, created_at, updated_at, terminal_at) SELECT " +
+      placeholders + " WHERE EXISTS (SELECT 1 FROM paper_accounts WHERE session_id = ? AND version = ? AND last_command_id = ?) ON CONFLICT(order_id) DO UPDATE SET filled_quantity=excluded.filled_quantity, remaining_quantity=excluded.remaining_quantity, status=excluded.status, average_fill_price=excluded.average_fill_price, fee=excluded.fee, realized_pnl=excluded.realized_pnl, reserved_cash=excluded.reserved_cash, reserved_quantity=excluded.reserved_quantity, rejection_code=excluded.rejection_code, rejection_reason=excluded.rejection_reason, book_sequence=excluded.book_sequence, book_received_at=excluded.book_received_at, updated_at=excluded.updated_at, terminal_at=excluded.terminal_at"
     ).bind(...values, ...guard));
   }
 
   for (const item of options.fills || []) {
-    const values = fillRow(item.fill, item.order, sessionId, item.index);
+    const values = fillRow(item.fill, item.order, sessionId, item.fill.fillIndex || item.index);
     const placeholders = values.map(() => "?").join(", ");
     statements.push(db.prepare(
       "INSERT OR IGNORE INTO paper_fills (fill_id, order_id, session_id, fill_index, symbol, side, quantity, price, notional, fee, realized_pnl, liquidity_model, book_sequence, book_received_at, created_at) SELECT " +
@@ -697,6 +706,7 @@ export async function handlePaperOrders(request, env) {
       context = await fetchMarketContext(input.symbol, env, true);
       const result = simulateNewOrder(account, input, context);
       order = result.order;
+      order.requestHash = requestHash;
       fills = result.fills;
       events.push({
         eventType: "paper.server.order.created",
@@ -710,6 +720,7 @@ export async function handlePaperOrders(request, env) {
       }
     } catch (error) {
       order = rejectionOrder(input, error);
+      order.requestHash = requestHash;
       account.orders.unshift(order);
       if (account.orders.length > 300) account.orders.length = 300;
       events.push({
@@ -794,10 +805,9 @@ function processLimitOrders(account, symbol, book, marks) {
     const beforeRemaining = Number(order.remainingQty);
     releaseReservation(account, order, walk.filledQty);
     const orderFills = [];
-    let fillIndex = Number(order.filledQty > 0 ? Math.floor(order.filledQty * 1e8) : 0) + 1;
     for (const rawFill of walk.fills) {
-      const fill = applyFill(account, order, rawFill, fillIndex++, book);
-      fills.push({ fill, order, index: fills.length + 1 });
+      const fill = applyFill(account, order, rawFill, order.fillCount + 1, book);
+      fills.push({ fill, order, index: fill.fillIndex });
       orderFills.push(fill);
     }
     if (order.remainingQty <= EPS) {
@@ -836,8 +846,13 @@ export async function handlePaperMarketTick(request, env) {
       return json({ ok: true, changed: false, reason: "NO_OPEN_ORDERS", account: account });
     }
     const context = await fetchMarketContext(symbol, env, false);
+    if (Number(account.lastBookSequence && account.lastBookSequence[symbol] || 0) >= context.book.sequence) {
+      return json({ ok: true, changed: false, reason: "BOOK_SEQUENCE_ALREADY_PROCESSED" });
+    }
     const result = processLimitOrders(account, symbol, context.book, context.marks);
     if (!result.updatedOrders.length) return json({ ok: true, changed: false, reason: "NO_MARKETABLE_ORDERS" });
+    account.lastBookSequence = account.lastBookSequence || {};
+    account.lastBookSequence[symbol] = context.book.sequence;
 
     const commandId = "tick:" + symbol + ":" + context.book.sequence;
     const committed = await commitState(db, auth.sessionId, current, account, commandId, {
