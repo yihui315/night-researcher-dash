@@ -76,6 +76,7 @@
 |---|---|---|---|
 | T00 基线统一 | ✅ 完成 | — | 五文档齐备，分支核查真实 |
 | P1-2 定点精度修复 | ✅ 完成 | 已选方案 A（分支A+移植定点） | 已收口，提交 ecc37a2/6e60b9d/26cefef/6e780ab |
+<<<<<<< Updated upstream
 | P1-5 收敛 PR | 🟡 待主理人点链接 | 本机无 `gh` / `GITHUB_TOKEN`，无法自动建 PR | 已 push 全部分支；[创建 PR 地址](https://github.com/yihui315/night-researcher-dash/compare/feat/p2-server-authoritative-paper...feat/p2-fixedpoint) |
 | P1-7 迁移前后一致性测试 | ✅ 完成 | — | `tests/migration-fixedpoint.test.cjs` 5/5 |
 | T02 D1 验收套件 | 🟡 待授权运行 | 需 Cloudflare 账号 token（仅测试库权限） | 套件已落盘；`node scripts/d1-verify.mjs` 授权后自动跑 |
@@ -87,19 +88,49 @@
 ---
 
 ## 本回合 Git 提交记录（feat/p2-fixedpoint）
+=======
+| P1-5 收敛 PR | 🟡 待主理人点链接 | 本机无 `gh` / `GITHUB_TOKEN`，无法自动建 PR | [创建 PR 地址](https://github.com/yihui315/night-researcher-dash/compare/feat/p2-server-authoritative-paper...feat/p2-fixedpoint) |
+| T02 D1 实跑验收 | 🟡 待授权运行 | 需 Cloudflare 测试库 token（仅测试库权限） | `d1-verify.mjs` 未授权输出 BLOCKED 退出 0（不伪造）；授权即跑 |
+| T03 JEV 六页 | 🟢 完成·待推送 | GitHub 502 阻断推送 | `feat/jev-trading-workbench`（`2dc4ad6`），27/27 测试，未碰用户未提交文件 |
+| T04 六角色 | 🟢 完成·待推送 | GitHub 502 阻断推送 | `feat/ai-six-roles`（`4b64ea5`，rebase 清除重复文档提交），9/9 测试 |
+| T05 数据管道 | 🟢 完成·待推送 | GitHub 502 阻断推送 | `feat/research-data-pipeline`（`8f85202`），7/7 测试，216 快照 + 日报（离线 Mock） |
+
+---
+
+## 本回合 Git 提交记录
+### feat/p2-fixedpoint（night_researcher，待推送：GitHub 502）
+>>>>>>> Stashed changes
 - `ecc37a2` feat(p2): 定点金额计算基石 — BigInt 1e8 decimal 模块 + 迁移 + 10/10 测试
 - `6e60b9d` feat(p2): 定点金额引擎集成 — paper-server.mjs 金额层移植 BigInt 1e8
 - `26cefef` docs(p2): 同步并刷新 TASK_BOARD.md
 - `6e780ab` test(p2): 增加迁移前后数据一致性测试（定点 1e8 口径）
 - `7df882e` docs(t00): 统一项目基线文档五件套 + 刷新状态/看板 — **待推送（GitHub 502）**
 - `426328d` docs+tooling(t02): D1 部署与验收套件 + 迁移审查（B02）— **待推送（GitHub 502）**
+<<<<<<< Updated upstream
 - 工作分支领先分支 A 6 个提交；远程分支 A `feat/p2-server-authoritative-paper`(107a6ec)、`feat/paper-trading-command-center`(360d1df)
+=======
+- `2e9d470` docs(t00-t05): Sprint 002 进展刷新 — **待推送（GitHub 502）**
+### feat/ai-six-roles（night_researcher，待推送：无远程跟踪 + 502）
+- `4b64ea5` feat(ai): six-role decision system (SPOTTER→PRIOR→EDGE→KELLY→TAKER→CLOSER) — rebase 清除重复文档提交；9/9 测试
+### feat/research-data-pipeline（night_researcher，待推送：无远程跟踪 + 502）
+- `8f85202` feat(research): quant research data pipeline (offline, deterministic) — 7/7 测试，216 快照 + 日报（data/ 已 `git add -f`）
+### feat/jev-trading-workbench（jev 仓，待推送：502）
+- `2dc4ad6` feat(trading): add Paper Trading × Night Researcher workbench — 六页 + Paper API 客户端 + Mock Contract + 路由集成；27/27 Vitest
+- 工作分支领先分支 A 4~6 个提交；远程分支 A `feat/p2-server-authoritative-paper`(107a6ec)、`feat/paper-trading-command-center`(360d1df)
+>>>>>>> Stashed changes
 - 旧分支 `feat/p2-paper-backend`(本地 df8f643) 标废弃候选，不删不推进
 
 ## 测试结果（真实，当前提交重跑，非虚构）
 - 定点模块 `tests/decimal.test.cjs`：10/10（含浮点缺陷反证、手续费 `10000.01*0.001`、大额无损、序列化可逆）。
 - 迁移一致性 `tests/migration-fixedpoint.test.cjs`：5/5（0003 变换复刻、0.1+0.2 漂移纠正、手续费一致、NULL 安全、round-trip < 1e-8）。
+<<<<<<< Updated upstream
 - 全量非 e2e：**81/81 零回归**（paper-server/ledger/engine/client/jev-trading-api 47 + orchestrator/ai-proxy/depth-sequencer 19 + decimal 10 + 迁移 5）。
 - 完整日志：`reports/TEST_LOG_81_2026-11-03.md`（2026-11-03 重跑）。
+=======
+- 全量非 e2e（T01/T02 基线）：**81/81 零回归**（paper-server/ledger/engine/client/jev-trading-api 47 + orchestrator/ai-proxy/depth-sequencer 19 + decimal 10 + 迁移 5）。完整日志：`reports/TEST_LOG_81_2026-11-03.md`。
+- **T03 JEV 六页（jev 仓 `feat/jev-trading-workbench`）**：`npx vitest run src/views/trading` → **27 passed (15 paperApi + 12 RoleCard)**（已独立复跑核验）。
+- **T04 六角色（night_researcher `feat/ai-six-roles`）**：`node --test tests/six-roles.test.cjs` → **9 passed / 0 failed**（隔离 worktree 独立复跑核验；分支全量 81+9=90/90）。
+- **T05 数据管道（night_researcher `feat/research-data-pipeline`）**：`node --test tests/research-pipeline.test.cjs` → **7 passed / 0 failed**（含端到端 collect/split/simulate/OOS 指标计算；分支全量 81+7=88/88）。
+>>>>>>> Stashed changes
 - e2e（playwright，需浏览器/网络）场景已由 `paper-server.test.cjs` 单测等价覆盖，离线不跑。
 - 分支 A 原单测 37/37（FakeD1 内存实现，无 wrangler/网络依赖）。

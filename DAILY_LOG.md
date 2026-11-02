@@ -52,7 +52,47 @@
 
 ---
 
-## 真实 PR 创建地址（T01）
+## 2026-11-03（GMT+8）— Sprint 002：T03/T04/T05 交付 + 独立核验
+
+### 1. 今日完成任务
+- **T02 D1 验收套件（B05/B06 就绪）**：`wrangler.toml`（独立测试库 `paper_test`）+ `scripts/d1-migrate.mjs`（幂等迁移运行器）+ `scripts/d1-verify.mjs`（真实 D1 验收：batch 回滚/幂等键/并发乐观锁/账户隔离/事件回放哈希链）；未授权时输出 `BLOCKED: AUTH REQUIRED` 退出 0，**不伪造**。四份报告：`D1_DEPLOYMENT/CONCURRENCY/RECOVERY/TRANSACTION_TEST.md`；`TEST_LOG_81_2026-11-03.md` 记录 81/81 重跑。
+- **T03 JEV 六交易页（子 Agent，分支 `feat/jev-trading-workbench`，jev 仓，commit `2dc4ad6`）**：六页（市场总览/交易工作台/AI 六角色中心/风险管理/策略研究/交易审计）+ Paper API 客户端 TS + Mock Contract + 路由集成（复用自定义 hash 路由/`navigation.ts`/`authorizedFetch`）。**独立核验**：`npx vitest run src/views/trading` → **27 passed (15 paperApi + 12 RoleCard)**。未提交用户 artifacts 未碰。`createPaperOrder` 强制 `confirmationId`（TAKER 不可绕过）。
+- **T04 六角色（子 Agent，分支 `feat/ai-six-roles`，commit `4b64ea5`，rebase 清除重复文档提交 `8f659b4`）**：`functions/_lib/six-roles/` 四模块 + `tests/six-roles.test.cjs`。Schema 强制全部审计字段（run_id/strategy_id/strategy_version/market_snapshot_id/provider/model/prompt_tokens/completion_tokens/latency/decision/rejection_reason）+ decision_chain_id 串联。门禁落实：EDGE 无证据不晋级 / KELLY 样本不足仓位为零 / OOS 未过禁晋级 / TAKER 仅 PROPOSAL_ONLY（`__accountUntouched` 断言，账户克隆不改原对象）/ CLOSER 记录退出理由。**独立核验**（隔离 worktree）：`node --test tests/six-roles.test.cjs` → **9 passed / 0 failed**。
+- **T05 量化研究数据管道（子 Agent，分支 `feat/research-data-pipeline`，commit `8f85202`）**：`functions/_lib/research/` 八模块 + `scripts/research-pipeline.mjs` + `tests/research-pipeline.test.cjs`。数据源 `dataSource.mjs` 为**确定性离线 Mock**（mulberry32 种子 PRNG，未连真实交易所，符合"不用真实资金"纪律）；`split.mjs` 严格按日期切分 train/validate/OOS 并断言 OOS 隔离；`strategyVersions.mjs` 冻结策略版本（fnv1a 内容哈希）；`snapshotStore.mjs` 落盘快照。产出 `data/market_snapshots/{BTCUSDT,ETHUSDT,ORDIUSDT}/*.json` 共 **216 个** + `data/strategy_versions/mean-reversion-sma5@v1.0.0.json` + `reports/RESEARCH_DAILY_2026-11-03.md`（由样本实算 141 样本/26 交易/净盈亏 6762.9981/最大回撤 0.05%，非编造）。**独立核验**：`node --test tests/research-pipeline.test.cjs` → **7 passed / 0 failed**（含端到端 collect/split/simulate/OOS 指标）。
+
+### 2. 修改文件与提交 SHA
+- night_researcher `feat/p2-fixedpoint`：待推送 `7df882e`（T00 文档五件套）、`426328d`（T02 套件+0003 审查）、`2e9d470`（Sprint 002 进展刷新）。
+- night_researcher `feat/ai-six-roles`：`4b64ea5` feat(ai): six-role decision system — **待推送**（无远程跟踪 + GitHub 502）。
+- night_researcher `feat/research-data-pipeline`：`8f85202` feat(research): quant research data pipeline (offline, deterministic) — **待推送**（无远程跟踪 + GitHub 502）；`data/` 经 `git add -f` 入库。
+- jev 仓 `feat/jev-trading-workbench`：`2dc4ad6` feat(trading): add Paper Trading × Night Researcher workbench — **待推送**（GitHub 502）。
+
+### 3. 自动化测试真实结果（独立复跑核验，非自证）
+- T01/T02 基线：81/81 非 e2e 零回归（完整日志 `reports/TEST_LOG_81_2026-11-03.md`）。
+- T03 JEV 六页：27 passed（jev 仓，独立复跑）。
+- T04 六角色：9 passed / 0 failed（隔离 worktree 复跑；分支全量 81+9=90/90）。
+- T05 数据管道：7 passed / 0 failed（含端到端 OOS 指标；分支全量 81+7=88/88）。
+
+### 4. 未完成任务及原因
+- **PR 仍待主理人创建**：本机无 `gh`/Token，无法自动建；Web 链接见文末及 PROJECT_STATUS §5。
+- **T02 真实 D1 运行**：待 Cloudflare 测试库授权（仅测试库权限）；`d1-verify.mjs` 未授权输出 `BLOCKED` 退出 0，不伪造。
+- **全部推送受阻（GitHub 502）**：`feat/p2-fixedpoint`(3) / `feat/ai-six-roles` / `feat/research-data-pipeline` / jev `feat/jev-trading-workbench` 本地均已提交，网络恢复即补推，**不空转重试**。
+
+### 5. 阻塞与需要的授权
+- Cloudflare 测试环境授权（token 仅测试库权限）—— 用于 T02 真实 D1 部署/并发/幂等/回滚/恢复验收。
+- 主理人点开 PR 创建链接完成 T01 收口（或提供 gh/Token 由我代建）。
+
+### 6. 明日/下一步执行任务
+- 网络恢复后补推四分支（night_researcher ×3 + jev ×1）。
+- 获 Cloudflare 授权后运行 `node scripts/d1-verify.mjs` 真实 D1 验收并填 `reports/D1_VERIFY_RESULT.md`。
+- 合入 T03/T04/T05 后推进 Phase 4 持续运行 + Phase 5 集成交付。
+
+### 7. 整体达成度与计划偏差
+- T00：✅ 100%。T01：🟢 90%（代码/测试全完，PR 待主理人创建）。T02：🟡 ~50%（套件+审查就绪，真实运行待 Cloudflare 授权）。T03：🟢 100%（交付+独立核验 27/27）。T04：🟢 100%（交付+独立核验 9/9）。T05：🟢 100%（交付+独立核验 7/7，216 快照+日报）。
+- 计划偏差：无重大偏差；T02 真实运行受 Cloudflare 授权阻塞（已在无授权时完成全部本地等价工作与脚本准备）；所有推送受 GitHub 502 阻断，本地均已提交，待网络恢复补推，符合"不依赖单一授权/网络而停滞"的指令。
+
+---
+
+## 真实 PR 创建地址（T01，待主理人点开）
 ```
 https://github.com/yihui315/night-researcher-dash/compare/feat/p2-server-authoritative-paper...feat/p2-fixedpoint
 ```

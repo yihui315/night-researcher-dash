@@ -2,7 +2,7 @@
 
 > 总控执行令 V1.1 统一项目状态。由 WorkBuddy（工程总执行负责人）维护。
 > 所有结论基于真实 `git` / 文件系统 / 本地测试核查，非推测。
-> 更新时间：2026-11-03（GMT+8）— Sprint 002 启动：T02 验收套件就绪、T03/T04/T05 并行派遣
+> 更新时间：2026-11-03（GMT+8）— Sprint 002：T02 套件就绪、T03/T04/T05 已交付并独立核验（27/9/7 测试）
 
 ---
 
@@ -64,10 +64,11 @@
 |---|---|---|
 | T00 基线统一 | 🟢 完成 | 五文档齐备；两仓库 Git/分支/未提交文件真实核查；`feat/p2-paper-backend` 标废弃候选 |
 | Phase 1 P2 收口 | 🟢 定点集成 + PR 收口完成 | 代码已全推 origin；PR 创建链接就绪（base=分支A）；剩余验收：D1 实跑（需账号 token） |
-| T02 D1 验收 | 🟡 进行中 | 套件已落盘（wrangler.toml + d1-migrate/d1-verify + 4 报告 + 0003 审查）；真实 D1 运行**待 Cloudflare 授权** |
-| Phase 2 JEV 前端六页 | 🟡 进行中 | 子 Agent 已在 `feat/jev-trading-workbench` 实做六页（复用 Provider Center / 自定义 hash 路由 / tradingApi 契约 / Mock Contract）；未提交文件未碰 |
-| Phase 3 六角色 | 🟡 进行中 | 子 Agent 已在 `feat/ai-six-roles` 复用 `agent-orchestrator.mjs`/`ai-core.mjs` 建 SPOTTER→…→CLOSER + 门禁 |
-| Phase 4 持续运行 | ⬜ 未启动 | 依赖 T02/T03/T04 稳定；研究数据管道（T05）由子 Agent 并行启动 |
+| T02 D1 验收 | 🟡 套件就绪·真实运行待授权 | 套件已落盘（wrangler.toml + d1-migrate/d1-verify + 4 报告 + 0003 审查）；`d1-verify` 未授权输出 `BLOCKED: AUTH REQUIRED` 退出 0（不伪造）；真实 D1 运行**待 Cloudflare 授权** |
+| Phase 2 JEV 前端六页 | 🟢 完成·待合入 | 子 Agent 交付 `2dc4ad6`（24 文件：六页+Paper API 客户端 TS+Mock Contract+路由集成+27 Vitest）；**已独立核验 27/27 通过**，未提交用户文件未碰 |
+| Phase 3 六角色 | 🟢 完成·待合入 | 子 Agent 交付 `4b64ea5`（feat/ai-six-roles，rebase 清除重复文档提交后）；统一 Schema 含全部审计字段 + TAKER 仅提案（`__accountUntouched` 断言）；**已独立核验 9/9 通过** |
+| 量化研究 T05 数据管道 | 🟢 完成·待合入 | 子 Agent 交付 `8f85202`（feat/research-data-pipeline）；离线 Mock 数据源（未连真实交易所）+ 快照存储 + 策略版本冻结 + OOS 隔离 + 每日绩效；**已独立核验 7/7 通过**，216 快照 + 日报已落盘 |
+| Phase 4 持续运行 | 🟡 数据管道就绪 | T05 管道已可跑；持续运行依赖 T02/T03/T04 合入与稳定后端 |
 | Phase 5 集成交付 | ⬜ 未启动 | — |
 
 ---
@@ -77,16 +78,16 @@
 2. **D1 实例创建需 Cloudflare 账号**：无 token 无法代建；本地 FakeD1/SQLite 已做等价测试。`scripts/d1-verify.mjs` 未授权时输出 `BLOCKED: AUTH REQUIRED` 并退出 0，**不伪造结果**。
 3. **night_researcher 本地 `main`(`b9eee3b`) 与 `origin/main`(`43c63e9`) 不一致**：按纪律**不直改 main**，仅记录、不调查不改动；待主理人决定如何对齐。
 4. ~~**引擎定点集成风险**~~：已收口。回放哈希依赖 `stableStringify(account)` 一致，金额字段统一字符串化（`U()`）+ `D()` 还原，已端到端验证。
-5. **GitHub 出网间歇性 502**：`feat/p2-fixedpoint` 有 **2 个提交待推送**（`7df882e` T00 文档、`426328d` T02 套件）；本地已提交，网络恢复即补推，**不空转重试**。
-6. **T03/T04/T05 由子 Agent 在独立分支实做**：前端分支 `feat/jev-trading-workbench`（jev 仓）、AI `feat/ai-six-roles`、研究 `feat/research-data-pipeline`（night_researcher 仓）。均受 GIT 安全约束（不碰用户未提交文件、不直推）。
+5. **GitHub 出网持续 502（截至 2026-11-03 仍 502）**：所有推送受阻。待推分支：`feat/p2-fixedpoint`（3 提交 `7df882e`/`426328d`/`2e9d470`）、`feat/ai-six-roles`（`4b64ea5`，无远程跟踪）、jev 仓 `feat/jev-trading-workbench`（`2dc4ad6`）。本地均已提交，**不空转重试**，网络恢复即补推。
+6. **T03/T04/T05 已由子 Agent 在独立分支交付并独立核验**：前端 `feat/jev-trading-workbench`（jev 仓，`2dc4ad6`/27 测试）、AI `feat/ai-six-roles`（night_researcher 仓，`4b64ea5`/9 测试）、研究 `feat/research-data-pipeline`（night_researcher 仓，`8f85202`/7 测试）。均受 GIT 安全约束，未碰用户未提交文件、不直推。
 
 ---
 
 ## 5. 下一步
 1. ✅ T00 基线统一完成（五文档 + 分支核查）。
-2. ✅ T01 定点精度修复收口，81/81 非 e2e 测试零回归，4 个提交全推 origin。
-3. 主理人点开 PR 创建链接完成 T01；或授权 gh/Token 由我代建。
-4. 网络恢复后补推 `7df882e` + `426328d`。
-5. 获 Cloudflare 授权后运行 **T02** 真实 D1 验收（`node scripts/d1-verify.mjs`）。
-6. 跟进 **T03/T04/T05** 子 Agent 交付（六页 / 六角色 / 数据管道），验收其提交与测试后合入各自 feature 分支。
-7. 按 Sprint 002 五日节点推进（11-03 PR+前端结构 / 11-04 迁移审查+六页框架 / 11-05 D1 准备+三页可运行 / 11-06 六角色 Schema+数据管道 / 11-07 三组阶段报告）。
+2. ✅ T01 定点精度修复收口，81/81 非 e2e 测试零回归，提交已就绪待推。
+3. ✅ T03 JEV 六页交付并独立核验（27/27）。✅ T04 六角色交付并独立核验（9/9）。✅ T05 数据管道交付并独立核验（7/7，216 快照 + 日报）。
+4. **主理人动作 A**：点开 PR 创建链接完成 T01（base=分支A，head=fixedpoint）；或授权 gh/Token 由我代建。
+5. **主理人动作 B**：提供 Cloudflare 测试库 token（仅测试库权限）→ 运行 `node scripts/d1-verify.mjs` 真实 D1 验收并填 `reports/D1_VERIFY_RESULT.md`。
+6. 网络恢复后补推三分支（night_researcher `feat/p2-fixedpoint`/`feat/ai-six-roles` + jev `feat/jev-trading-workbench`），不空转重试。
+7. 合入 T03/T04/T05 后推进 Phase 4 持续运行 + Phase 5 集成交付。
