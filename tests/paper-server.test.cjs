@@ -5,6 +5,7 @@ const {
   handlePaperAccount,
   handlePaperOrders,
   handlePaperMarketTick,
+  handlePaperAccountReset,
   handlePaperReplay,
   handlePaperServerEvents,
   __test
@@ -294,7 +295,9 @@ test("client order id is idempotent and cannot be reused with different order pa
   const duplicate = await handlePaperOrders(request(), env);
   assert.equal(first.status, 201);
   assert.equal(duplicate.status, 200);
-  assert.equal((await duplicate.json()).duplicate, true);
+  const duplicateData = await duplicate.json();
+  assert.equal(duplicateData.duplicate, true);
+  assert.equal(duplicateData.order.id, (await first.clone().json()).order.id);
   assert.equal(env.PAPER_DB.orders.size, 1);
   assert.equal(env.PAPER_DB.fills.size, 1);
 
@@ -388,6 +391,25 @@ test("optimistic account versioning allows only one of two concurrent orders to 
   assert.deepEqual(statuses, [201, 409]);
   assert.equal(env.PAPER_DB.orders.size, 1);
   assert.equal(env.PAPER_DB.fills.size, 1);
+});
+
+test("account reset requires confirmation and is idempotent while preserving the server event history", async () => {
+  const env = envWith(makeMarketFetch());
+  const cookie = await createSession(env);
+  await handlePaperOrders(makeRequest("https://nr.example/api/paper/orders", "POST", cookie, orderInput()), env);
+  const resetBody = { clientActionId: "reset-action-0001", confirmationId: "reset-confirm-0001" };
+  const first = await handlePaperAccountReset(makeRequest("https://nr.example/api/paper/account/reset", "POST", cookie, resetBody), env);
+  const firstData = await first.json();
+  assert.equal(first.status, 200);
+  assert.equal(firstData.account.cash, 10000);
+  assert.equal(firstData.account.generation, 2);
+  const versionAfterReset = firstData.account.version;
+  const second = await handlePaperAccountReset(makeRequest("https://nr.example/api/paper/account/reset", "POST", cookie, resetBody), env);
+  const secondData = await second.json();
+  assert.equal(secondData.duplicate, true);
+  assert.equal(secondData.account.version, versionAfterReset);
+  assert.equal(env.PAPER_DB.orders.size, 1);
+  assert.ok(env.PAPER_DB.events.some(event => event.event_type === "paper.server.account.reset"));
 });
 
 test("event replay verifies the hash-linked account snapshots and returns the recoverable account", async () => {
