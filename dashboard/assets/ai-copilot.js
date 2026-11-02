@@ -204,7 +204,16 @@
         $("aiTeamStatus").textContent = "流程未完成";
         $("aiTeamStatus").className = "small-pill ai-status error";
         $("aiTeamOutput").textContent = "流程中止，未生成订单。";
-        appendMessage("assistant", "六 Agent 流程中止：" + (data.error || "请求失败") + (data.agent ? " · 阻塞角色 " + data.agent : "") + (data.providerErrorCode ? " · 错误码 " + data.providerErrorCode : "") + (data.finishReason ? " · finish_reason " + data.finishReason : ""));
+        const diag = data.diagnostics ? " · 响应诊断 " + JSON.stringify({
+          finishReason: data.diagnostics.finishReason,
+          contentType: data.diagnostics.contentType,
+          contentPresent: data.diagnostics.contentPresent,
+          contentParts: data.diagnostics.contentParts,
+          hasReasoningContent: data.diagnostics.hasReasoningContent,
+          hasToolCalls: data.diagnostics.hasToolCalls,
+          usage: data.diagnostics.usage
+        }) : "";
+        appendMessage("assistant", "六 Agent 流程中止：" + (data.error || "请求失败") + (data.agent ? " · 阻塞角色 " + data.agent : "") + (data.providerErrorCode ? " · 错误码 " + data.providerErrorCode : "") + (data.finishReason ? " · finish_reason " + data.finishReason : "") + diag);
         if (typeof window.NRTradingRefreshAudit === "function") void window.NRTradingRefreshAudit();
         if (data.partial) appendMessage("assistant", "已完成的角色结果：\n" + JSON.stringify(data.partial, null, 2));
         return;
