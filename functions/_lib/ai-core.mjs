@@ -36,18 +36,18 @@ function json(body, status = 200) {
 }
 
 function textContent(content) {
-  if (typeof content === "string") return content.replace(/<think>[\\s\\S]*?<\\/think>/gi, "").trim();
+  if (typeof content === "string") return content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
   if (Array.isArray(content)) {
     return content.map(part => {
       if (!part || typeof part !== "object") return "";
       if (typeof part.text === "string" && ["text", "output_text", "text_delta"].includes(String(part.type || "text"))) return part.text;
       if (part.type === "text" && part.text && typeof part.text.value === "string") return part.text.value;
       return "";
-    }).filter(Boolean).join("\\n").replace(/<think>[\\s\\S]*?<\\/think>/gi, "").trim();
+    }).filter(Boolean).join("\n").replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
   }
   if (content && typeof content === "object") {
     const candidate = typeof content.text === "string" ? content.text : typeof content.value === "string" ? content.value : "";
-    return candidate.replace(/<think>[\\s\\S]*?<\\/think>/gi, "").trim();
+    return candidate.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
   }
   return "";
 }
