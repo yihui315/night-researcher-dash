@@ -184,7 +184,7 @@ class MyStrategy:
 - MiniMax：模型 `MiniMax-M3`；中国站 `https://api.minimaxi.com/v1`、国际站 `https://api.minimax.io/v1`，API Key 与区域必须匹配。
 - Qwen：使用 Model Studio 通用 API Key（`sk-`）和与密钥同区域的 Workspace ID；默认 `qwen3-coder-next`，同时支持 `qwen3-coder-plus`、`qwen3.8-max`、`qwen3.7-plus`、`qwen3.6-plus`。
 - **不要把 Qwen Coding Plan 的 `sk-sp-` 密钥填入网页**。该套餐仅供 Qwen Code 等交互式编程工具使用，不用于本应用后端。
-- 六角色顺序：SPOTTER → PRIOR → EDGE → KELLY → TAKER → CLOSER。SPOTTER/PRIOR/EDGE/CLOSER 由模型分别调用；KELLY 使用 95% Wilson 胜率下界 + 1/4 Kelly + 10% 上限；TAKER 只生成提案。没有已验证历史/OOS 指标时 Kelly=0；TAKER 不自动创建模拟单或真实订单。
+- 六角色顺序：SPOTTER → PRIOR → EDGE → KELLY → TAKER → CLOSER。SPOTTER/PRIOR/EDGE/CLOSER 由模型分别调用；KELLY 的计算函数采用 95% Wilson 胜率下界 + 1/4 Kelly + 10% 上限；但 Agent API 目前不接受客户端提交的回测统计，因服务端可信研究账本尚未建成，故当前 KELLY 恒为 0、TAKER 恒阻断。TAKER 永远不会自动创建模拟单或真实订单。
 - AI 只生成研究意见，不决定策略是否放行，不生成真实交易指令。研究门禁仍由程序计算。
 - 收益研究与模拟验收路线见 `盈利研究计划.md`。
 
