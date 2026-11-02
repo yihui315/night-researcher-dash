@@ -1,4 +1,5 @@
 import { handleAiChat } from "./ai-core.mjs";
+import { appendTrustedEvent } from "./paper-ledger.mjs";
 
 const ALLOWED_SYMBOLS = new Set(["BTCUSDT", "ETHUSDT", "ORDIUSDT", "1000SATSUSDT"]);
 
@@ -169,7 +170,7 @@ async function sha256Hex(value) {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function handleAgentResearch(request, aiHandler = handleAiChat) {
+export async function handleAgentResearch(request, aiHandler = handleAiChat, env = null) {
   if (request.method !== "POST") return json({ error: "仅支持 POST" }, 405);
   const origin = request.headers.get("Origin");
   const requestOrigin = new URL(request.url).origin;
@@ -195,6 +196,21 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat) {
     : crypto.randomUUID();
   const startedAt = new Date().toISOString();
   const snapshotHash = await sha256Hex(JSON.stringify(snapshot));
+  const recordRunEvent = async (eventType, payload) => {
+    if (!env) return false;
+    return appendTrustedEvent(request, env, {
+      eventId: eventType + ":" + runId,
+      eventType,
+      payload: { runId, snapshotHash, ...payload }
+    });
+  };
+  await recordRunEvent("agent.run.started", {
+    provider: String(body.provider || ""),
+    model: String(body.model || ""),
+    promptVersion: "nr-agent-research-v1",
+    startedAt,
+    snapshotSource: "browser-request-untrusted"
+  });
   const providerConfig = {
     provider: body.provider,
     model: body.model,
@@ -241,10 +257,19 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat) {
     try {
       response = await aiHandler(internalRequest);
     } catch (_) {
+      await recordRunEvent("agent.run.failed", { failedAgent: role.id, error: "AI 请求失败", partial: outputs, completedAt: new Date().toISOString() });
       return json({ ok: false, runId, snapshotHash, startedAt, agent: role.id, error: "AI 请求失败", partial: outputs, autoExecution: false }, 502);
     }
     const result = await response.json();
     if (!response.ok || !result.ok) {
+      await recordRunEvent("agent.run.failed", {
+        failedAgent: role.id,
+        error: result.error || "AI 研究步骤失败",
+        providerErrorCode: result.code || null,
+        finishReason: result.finishReason || null,
+        partial: outputs,
+        completedAt: new Date().toISOString()
+      });
       return json({
         ok: false,
         runId,
@@ -261,6 +286,12 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat) {
 
     const parsed = parseAgentObject(result.text);
     if (!roleValid(role.id, parsed)) {
+      await recordRunEvent("agent.run.failed", {
+        failedAgent: role.id,
+        error: "模型没有返回符合约定的结构化 JSON",
+        partial: outputs,
+        completedAt: new Date().toISOString()
+      });
       return json({ ok: false, runId, snapshotHash, startedAt, agent: role.id, error: "模型没有返回符合约定的结构化 JSON；本轮停止，不生成执行提案", partial: outputs, autoExecution: false }, 502);
     }
 
@@ -278,6 +309,24 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat) {
   }
 
   const completedAt = new Date().toISOString();
+  const runResult = {
+    runId,
+    snapshotHash,
+    promptVersion: "nr-agent-research-v1",
+    provider: String(body.provider || ""),
+    requestedModel: String(body.model || ""),
+    startedAt,
+    completedAt,
+    outputs,
+    usage,
+    safety: {
+      autoExecution: false,
+      liveTrading: false,
+      paperOrderCreated: false,
+      note: "AI 只产生研究结论；KELLY 与 TAKER 为确定性程序；任何模拟订单都必须由用户点击并重新通过 paper-engine 风控"
+    }
+  };
+  await recordRunEvent("agent.run.completed", runResult);
   return json({
     ok: true,
     runId,
@@ -292,11 +341,6 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat) {
     roles: ["SPOTTER", "PRIOR", "EDGE", "KELLY", "TAKER", "CLOSER"],
     outputs,
     usage,
-    safety: {
-      autoExecution: false,
-      liveTrading: false,
-      paperOrderCreated: false,
-      note: "AI 只产生研究结论；KELLY 与 TAKER 为确定性程序；任何模拟订单都必须由用户点击并重新通过 paper-engine 风控"
-    }
+    safety: runResult.safety
   });
 }
