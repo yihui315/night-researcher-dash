@@ -578,25 +578,96 @@ def _mk_trade(direction, ep, xp, ei, xi, ret, ctx, forced):
     }
 
 
+def _wilson_interval(wins, n, z=1.96):
+    if n <= 0:
+        return None
+    p = wins / n
+    z2 = z * z
+    den = 1 + z2 / n
+    centre = p + z2 / (2 * n)
+    margin = z * math.sqrt((p * (1 - p) / n) + z2 / (4 * n * n))
+    return {"lower": max(0.0, (centre - margin) / den),
+            "upper": min(1.0, (centre + margin) / den),
+            "confidence": 0.95, "method": "Wilson score interval"}
+
+
+def _percentile(values, p):
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = int(round((len(ordered) - 1) * p))
+    return ordered[max(0, min(len(ordered) - 1, index))]
+
+
+def _monte_carlo(trades, simulations=1000, seed=20261102):
+    """按净交易收益 bootstrap 重采样；不是逐笔盘口/价格路径模拟。"""
+    returns = [float(t.get("ret", 0.0)) for t in trades]
+    if not returns:
+        return {"simulations": 0, "method": "trade-return bootstrap", "status": "NO_TRADES"}
+    rng = random.Random(seed)
+    terminal_returns = []
+    max_drawdowns = []
+    n = len(returns)
+    for _ in range(simulations):
+        equity = 1.0
+        peak = 1.0
+        mdd = 0.0
+        for _ in range(n):
+            r = rng.choice(returns)
+            equity *= max(0.0, 1.0 + r)
+            peak = max(peak, equity)
+            if peak > 0:
+                mdd = max(mdd, (peak - equity) / peak)
+        terminal_returns.append(equity - 1.0)
+        max_drawdowns.append(mdd)
+    return {
+        "simulations": simulations,
+        "method": "bootstrap with replacement on net trade returns",
+        "status": "ESTIMATE",
+        "terminal_return_p05": _percentile(terminal_returns, 0.05),
+        "terminal_return_p50": _percentile(terminal_returns, 0.50),
+        "terminal_return_p95": _percentile(terminal_returns, 0.95),
+        "probability_of_loss": sum(1 for value in terminal_returns if value < 0) / simulations,
+        "max_drawdown_p95": _percentile(max_drawdowns, 0.95),
+        "limitation": "does not model serial correlation, changing liquidity, or intratrade price paths",
+    }
+
+
+def _slippage_sensitivity(trades, extra_bps=(0, 5, 10, 20, 50)):
+    """在原有单边成本之外，额外增加每边滑点，观察净收益退化。"""
+    if not trades:
+        return []
+    out = []
+    for bps in extra_bps:
+        equity = 1.0
+        extra_round_trip = 2 * (bps / 10000.0)
+        for trade in trades:
+            gross = float(trade.get("gross_ret", trade.get("ret", 0.0) + 2 * SIDE_COST))
+            net = gross - 2 * SIDE_COST - extra_round_trip
+            equity *= max(0.0, 1.0 + net)
+        out.append({"extra_slippage_bps_per_side": bps, "net_return": equity - 1.0})
+    return out
+
+
 def _summarize(trades, equity, oos_split_idx, bars):
-    # 标注 OOS（按出场 idx 是否 >= 拆分点）
     for t in trades:
         t["oos"] = t["exit_i"] >= oos_split_idx
 
-    # —— 超额收益（相对买入持有）：分离 Beta 与择时 skill ——
-    # 全窗口策略净收益 = 净值终值 - 1；买入持有 = 末收/首收 - 1。
     bh = buy_and_hold_return(bars)
     full_net = equity[-1] - 1.0
     excess = (full_net - bh) if bh is not None else None
-
     insample = [t for t in trades if not t["oos"]]
     oos = [t for t in trades if t["oos"]]
 
     def stats(sub):
         if not sub:
-            return {"n": 0, "win": 0, "win_rate": None, "avg_win": None,
-                    "avg_loss": None, "profit_factor": None, "expectancy": None, "payoff_ratio": None, "net": None,
-                    "regime": {}}
+            return {
+                "n": 0, "win": 0, "win_rate": None, "win_rate_ci95": None,
+                "avg_win": None, "avg_loss": None, "profit_factor": None,
+                "profit_factor_unbounded": False, "expectancy": None,
+                "payoff_ratio": None, "sharpe_per_trade": None,
+                "sortino_per_trade": None, "net": None, "regime": {},
+            }
         wins = [t["ret"] for t in sub if t["ret"] > 0]
         losses = [t["ret"] for t in sub if t["ret"] <= 0]
         n = len(sub)
@@ -605,31 +676,44 @@ def _summarize(trades, equity, oos_split_idx, bars):
         avg_loss = sum(losses) / len(losses) if losses else 0.0
         sum_w = sum(wins)
         sum_l = -sum(losses)
-        pf = (sum_w / sum_l) if sum_l > 0 else (float("inf") if sum_w > 0 else 0.0)
+        pf_unbounded = sum_l <= 0 and sum_w > 0
+        pf = (sum_w / sum_l) if sum_l > 0 else (None if pf_unbounded else 0.0)
         net = 1.0
         for t in sub:
-            net *= (1 + t["ret"])
+            net *= max(0.0, 1 + t["ret"])
         net -= 1.0
+        rets = [float(t["ret"]) for t in sub]
+        mean_ret = sum(rets) / n
+        variance = sum((value - mean_ret) ** 2 for value in rets) / (n - 1) if n > 1 else 0.0
+        std = math.sqrt(variance)
+        downside_dev = math.sqrt(sum(min(0.0, value) ** 2 for value in rets) / n)
+        sharpe = mean_ret / std if std > 0 else None
+        sortino = mean_ret / downside_dev if downside_dev > 0 else None
         reg = {}
         for t in sub:
             reg.setdefault(t["regime"], {"n": 0, "net": 1.0})
             reg[t["regime"]]["n"] += 1
-            reg[t["regime"]]["net"] *= (1 + t["ret"])
-        for k in reg:
-            reg[k]["net"] -= 1.0
-        return {"n": n, "win": len(wins), "win_rate": win_rate,
-                "avg_win": avg_win, "avg_loss": avg_loss,
-                "profit_factor": pf, "expectancy": sum(t["ret"] for t in sub) / n, "payoff_ratio": (avg_win / abs(avg_loss) if avg_loss < 0 else None), "net": net, "regime": reg}
+            reg[t["regime"]]["net"] *= max(0.0, 1 + t["ret"])
+        for key in reg:
+            reg[key]["net"] -= 1.0
+        return {
+            "n": n, "win": len(wins), "win_rate": win_rate,
+            "win_rate_ci95": _wilson_interval(len(wins), n),
+            "avg_win": avg_win, "avg_loss": avg_loss,
+            "profit_factor": pf, "profit_factor_unbounded": pf_unbounded,
+            "expectancy": mean_ret,
+            "payoff_ratio": (avg_win / abs(avg_loss) if avg_loss < 0 else None),
+            "sharpe_per_trade": sharpe, "sortino_per_trade": sortino,
+            "risk_metric_basis": "per-trade returns; not annualized",
+            "net": net, "regime": reg,
+        }
 
-    # 最大回撤（基于 equity 曲线）
     peak = equity[0]
     mdd = 0.0
-    for e in equity:
-        if e > peak:
-            peak = e
-        dd = (peak - e) / peak
-        if dd > mdd:
-            mdd = dd
+    for value in equity:
+        peak = max(peak, value)
+        dd = (peak - value) / peak if peak > 0 else 0.0
+        mdd = max(mdd, dd)
 
     return {
         "n_trades": len(trades),
@@ -637,12 +721,13 @@ def _summarize(trades, equity, oos_split_idx, bars):
         "equity_final": equity[-1],
         "buy_hold": bh,
         "full_net": full_net,
-        "excess": excess,   # 相对买入持有超额（主放行指标 g4 的数据源）
+        "excess": excess,
         "insample": stats(insample),
         "oos": stats(oos),
+        "monte_carlo": {"full": _monte_carlo(trades), "oos": _monte_carlo(oos)},
+        "slippage_sensitivity": _slippage_sensitivity(trades),
         "trades": trades,
     }
-
 
 # ---------------------------------------------------------------------------
 # 6. 三道关卡 + 反过拟合
