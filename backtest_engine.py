@@ -897,6 +897,28 @@ def build_card(strategy, summary, gates, overfit, sources, symbol, excess=None):
         "sources": sources,
         "excess": excess,
         "survived": survived,
+        "metrics": {
+            "insample": {
+                "win_rate": summary["insample"].get("win_rate"),
+                "win_rate_ci95": summary["insample"].get("win_rate_ci95"),
+                "expectancy": summary["insample"].get("expectancy"),
+                "profit_factor": summary["insample"].get("profit_factor"),
+                "profit_factor_unbounded": summary["insample"].get("profit_factor_unbounded"),
+                "sharpe_per_trade": summary["insample"].get("sharpe_per_trade"),
+                "sortino_per_trade": summary["insample"].get("sortino_per_trade"),
+            },
+            "oos": {
+                "win_rate": summary["oos"].get("win_rate"),
+                "win_rate_ci95": summary["oos"].get("win_rate_ci95"),
+                "expectancy": summary["oos"].get("expectancy"),
+                "profit_factor": summary["oos"].get("profit_factor"),
+                "profit_factor_unbounded": summary["oos"].get("profit_factor_unbounded"),
+                "sharpe_per_trade": summary["oos"].get("sharpe_per_trade"),
+                "sortino_per_trade": summary["oos"].get("sortino_per_trade"),
+            },
+            "monte_carlo": summary.get("monte_carlo"),
+            "slippage_sensitivity": summary.get("slippage_sensitivity"),
+        },
     }
 
 
@@ -906,6 +928,23 @@ def format_card(card):
     lines.append(f"- **过了几关**：{card['passed']}")
     lines.append(f"- **死因 / 活下来理由**：{card['death_or_alive']}")
     lines.append(f"- **最大风险**：{card['max_risk']}")
+    metrics = card.get("metrics") or {}
+    ins = metrics.get("insample") or {}
+    oos = metrics.get("oos") or {}
+    ci = ins.get("win_rate_ci95") or {}
+    if ins.get("win_rate") is not None:
+        ci_text = f"（95% Wilson CI {ci.get('lower', 0):.1%}–{ci.get('upper', 0):.1%}）" if ci else ""
+        pf = "∞" if ins.get("profit_factor_unbounded") else _fmt_pct(ins.get("profit_factor"))
+        lines.append(f"- **样本内质量**：胜率 {ins['win_rate']:.1%}{ci_text}；Expectancy {_fmt_pct(ins.get('expectancy'))}；PF {pf}；Sharpe/Sortino（每笔）{_fmt_pct(ins.get('sharpe_per_trade'))}/{_fmt_pct(ins.get('sortino_per_trade'))}")
+    if oos.get("win_rate") is not None:
+        lines.append(f"- **OOS 质量**：胜率 {oos['win_rate']:.1%}；Expectancy {_fmt_pct(oos.get('expectancy'))}；PF {'∞' if oos.get('profit_factor_unbounded') else _fmt_pct(oos.get('profit_factor'))}")
+    mc = (metrics.get("monte_carlo") or {}).get("full") or {}
+    if mc.get("status") == "ESTIMATE":
+        lines.append(f"- **Monte Carlo（交易收益 bootstrap）**：终值 P05/P50/P95 {_fmt_pct(mc.get('terminal_return_p05'))}/{_fmt_pct(mc.get('terminal_return_p50'))}/{_fmt_pct(mc.get('terminal_return_p95'))}；亏损路径概率 {_fmt_pct(mc.get('probability_of_loss'))}；MDD P95 {_fmt_pct(mc.get('max_drawdown_p95'))}")
+    slip = metrics.get("slippage_sensitivity") or []
+    slip20 = next((item for item in slip if item.get("extra_slippage_bps_per_side") == 20), None)
+    if slip20:
+        lines.append(f"- **滑点压力**：额外每边 20 bps 后净收益 {_fmt_pct(slip20.get('net_return'))}")
     if card.get("excess") is not None:
         ex = card["excess"]
         lines.append(f"- **相对买入持有（超额收益）**：{ex*100:+.2f}%（策略样本内 − 同窗口买入持有；正数=跑赢 Beta）")
