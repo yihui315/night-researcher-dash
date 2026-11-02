@@ -85,7 +85,7 @@
     container.replaceChildren();
     empty.textContent = "正在读取服务端审计事件…";
     try {
-      const data = await state.ledger.readEvents(0, 100);
+      const data = await state.ledger.readLatestEvents(100);
       if (!data || !data.ok || data.available === false) {
         empty.textContent = "服务端审计未启用：当前仅本地模拟。配置 D1 binding PAPER_DB 与 PAPER_LEDGER_SECRET 后可保存研究运行记录。";
         return;
@@ -141,7 +141,7 @@
             return { title: "模拟账户快照", meta: [p.reason || "状态更新", Number.isFinite(Number(account.cash)) ? "现金 $" + Number(account.cash).toFixed(2) : null, Array.isArray(account.trades) ? account.trades.length + " 笔成交" : null].filter(Boolean).join(" · "), id: event.eventId, status: "已备份", time: event.createdAt };
           }
           if (event.eventType === "risk.decision") {
-            return { title: "风险决策 · " + (p.decision || "BLOCKED"), meta: ["Kelly " + (p.kellyStatus || "BLOCKED"), "仓位 " + (Number(p.allocationPct || 0)).toFixed(2) + "%", p.autoSubmit ? "自动提交" : "禁止自动提交"].join(" · "), id: p.runId || event.eventId, status: p.decision === "APPROVED" ? "待人工确认" : "已拦截", time: event.createdAt };
+            return { title: "风险决策 · " + (p.decision || "BLOCKED"), meta: ["Kelly " + (p.kellyStatus || "BLOCKED"), "仓位 " + (Number(p.allocationPct || 0)).toFixed(2) + "%", p.autoSubmit ? "自动提交" : "禁止自动提交"].join(" · "), id: p.runId || event.eventId, status: p.decision === "APPROVED" ? "待人工确认" : p.decision === "PROPOSAL_ONLY" ? "仅提案" : "已拦截", time: event.createdAt };
           }
           if (event.eventType === "strategy.gate.rejected" || event.eventType === "strategy.gate.passed") {
             return { title: "策略门禁 · " + (event.eventType.endsWith("passed") ? "通过" : "拒绝"), meta: String(p.reason || p.strategyId || "策略验证结果"), id: event.eventId, status: event.eventType.endsWith("passed") ? "通过" : "拒绝", time: event.createdAt };
