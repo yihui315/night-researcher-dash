@@ -164,6 +164,11 @@ function roleValid(role, value) {
   return false;
 }
 
+async function sha256Hex(value) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export async function handleAgentResearch(request, aiHandler = handleAiChat) {
   if (request.method !== "POST") return json({ error: "仅支持 POST" }, 405);
   const origin = request.headers.get("Origin");
@@ -184,6 +189,12 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat) {
 
   const snapshot = body.snapshot && typeof body.snapshot === "object" ? body.snapshot : null;
   if (!snapshot || JSON.stringify(snapshot).length > 12000) return json({ error: "缺少有效市场快照或快照过大" }, 400);
+  const suppliedRunId = String(body.runId || "");
+  const runId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(suppliedRunId)
+    ? suppliedRunId
+    : crypto.randomUUID();
+  const startedAt = new Date().toISOString();
+  const snapshotHash = await sha256Hex(JSON.stringify(snapshot));
   const providerConfig = {
     provider: body.provider,
     model: body.model,
@@ -228,16 +239,16 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat) {
     try {
       response = await aiHandler(internalRequest);
     } catch (_) {
-      return json({ ok: false, agent: role.id, error: "AI 请求失败", partial: outputs, autoExecution: false }, 502);
+      return json({ ok: false, runId, snapshotHash, startedAt, agent: role.id, error: "AI 请求失败", partial: outputs, autoExecution: false }, 502);
     }
     const result = await response.json();
     if (!response.ok || !result.ok) {
-      return json({ ok: false, agent: role.id, error: result.error || "AI 研究步骤失败", partial: outputs, autoExecution: false }, response.status || 502);
+      return json({ ok: false, runId, snapshotHash, startedAt, agent: role.id, error: result.error || "AI 研究步骤失败", partial: outputs, autoExecution: false }, response.status || 502);
     }
 
     const parsed = parseAgentObject(result.text);
     if (!roleValid(role.id, parsed)) {
-      return json({ ok: false, agent: role.id, error: "模型没有返回符合约定的结构化 JSON；本轮停止，不生成执行提案", partial: outputs, autoExecution: false }, 502);
+      return json({ ok: false, runId, snapshotHash, startedAt, agent: role.id, error: "模型没有返回符合约定的结构化 JSON；本轮停止，不生成执行提案", partial: outputs, autoExecution: false }, 502);
     }
 
     outputs[role.id] = { ...parsed, title: role.title, model: result.model };
@@ -253,8 +264,17 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat) {
     }
   }
 
+  const completedAt = new Date().toISOString();
   return json({
     ok: true,
+    runId,
+    snapshotHash,
+    promptVersion: "nr-agent-research-v1",
+    provider: String(body.provider || ""),
+    requestedModel: String(body.model || ""),
+    startedAt,
+    completedAt,
+    durationMs: Math.max(0, Date.parse(completedAt) - Date.parse(startedAt)),
     runMode: "research-only",
     roles: ["SPOTTER", "PRIOR", "EDGE", "KELLY", "TAKER", "CLOSER"],
     outputs,
