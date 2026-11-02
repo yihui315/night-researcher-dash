@@ -114,6 +114,7 @@ P1 数据接入顺序：
 - KELLY 与 TAKER 是确定性程序，不调用 LLM。
 - 当前六角色共享同一组 Provider/Model 配置；未来在 JEV Provider Center 按 Agent 映射不同模型。
 - 当前是串行角色提示词工作流，不应宣传为六个独立模型/自治 Agent 集群。
+- 每次研究请求现在带有 `runId`、市场快照 SHA-256、prompt version、provider/model、开始/完成时间、耗时和 Token 用量；浏览器将研究开始/完成/失败事件追加到 D1 事件日志（D1 未配置时保留在页面运行记录，不宣称云端持久化）。
 - KELLY 的 Wilson 下界 + 1/4 Kelly 计算函数和 TAKER 提案函数已有单元测试；但 Agent API 当前刻意向 KELLY 传入 `null`，不接受浏览器提交的策略统计，原因是服务端可信研究账本尚未建设。因此当前线上流程 KELLY 恒为 0，TAKER 恒阻断；未来接入服务端签名/版本化研究结果后才能解锁。
 
 ### Layer 4 — 独立验证、风险与执行
@@ -140,7 +141,7 @@ Paper Engine 当前约束：
 - 单日亏损 -3% 熔断；账户回撤 -10% 熔断。
 - 现货多头；不支持杠杆、裸卖空、提现或钱包。
 - 市价模拟按可见盘口逐档计算；限价单不模拟交易所队列优先级。
-- 账户只保存在当前浏览器 localStorage；不是服务端持久账本，清理浏览器数据会丢失。
+- 浏览器 localStorage 仍是本地模拟账户工作副本；已新增可选 Cloudflare D1 append-only 快照/事件恢复日志。D1 未绑定时退化为 local-only。快照由浏览器生成，不是可信服务端成交账本。
 - 交易对数量精度/最小数量/价格 tick 规则、部分成交和交易所真实手续费模型仍需补齐。
 
 Live Trading：
@@ -157,10 +158,14 @@ Live Trading：
 - 策略生命周期：Candidate → Backtest → OOS → Paper → Human Approval → Live → Suspended/Retired。
 - 策略晋级/降级由确定性门禁和人工审批决定，不能由 LLM 自行决定。
 
-当前缺口：
-- 只有浏览器 localStorage 交易状态，没有 append-only 服务端账本。
-- 没有跨设备账户、策略版本仓库、回放服务或自动淘汰调度器。
-- 建议开发阶段 SQLite + append-only event table；多进程/生产阶段 PostgreSQL。
+当前实现与缺口：
+- 新增 `functions/_lib/paper-ledger.mjs` 与 `/api/paper/session`、`/api/paper/ledger`。
+- D1 schema：`migrations/0001_paper_ledger.sql`，包括 HMAC 会话表、append-only 事件表、唯一 event_id、递增 seq。
+- Session cookie 为 Secure / HttpOnly / SameSite=Strict，7 天有效；服务端事件限制 150 KB、单会话 10,000 条，支持幂等 append 和按 seq / 最新 snapshot 读取。
+- Trading Desk 在本地保存模拟账户的同时，将账户快照和 Agent started/completed/failed 事件写入 D1；本地缓存丢失时，可在同一 HttpOnly 会话内恢复最近快照。
+- D1 binding `PAPER_DB` 与 `PAPER_LEDGER_SECRET` 必须在 Cloudflare Pages Preview/Production 配置；未配置时 UI 明确显示 local-only，不伪装云端成功。部署步骤见 `docs/CLOUDFLARE_D1_PAPER_LEDGER_SETUP.md`。
+- **信任边界**：快照由浏览器生成，用户可篡改；该服务目前是审计/恢复日志，不是权威执行账本。KELLY 仍不读取这些客户端快照，仍恒为 0；策略晋级和实盘不得使用这些数据。
+- 尚未完成：服务端确定性 Paper Engine、服务端订单/成交事件、跨设备用户身份、策略版本仓库、回放服务和自动淘汰调度器。下一阶段应把下单校验/撮合迁入可信 JEV 4779 后端或独立 Worker，再由服务端写入 order/fill ledger。
 
 ### Layer 6 — JEV 3D 交易指挥中心
 
