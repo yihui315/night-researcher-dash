@@ -115,6 +115,28 @@ test("six-role pipeline calls four AI roles and keeps execution disabled", async
   assert.equal(data.safety.paperOrderCreated, false);
 });
 
+test("agent run preserves structured provider output failure metadata", async () => {
+  const { handleAgentResearch } = await modulePromise;
+  const response = await handleAgentResearch(makeRequest({
+    provider: "minimax",
+    model: "MiniMax-M3",
+    apiKey: "mm-test-key-123456",
+    region: "china",
+    snapshot: { selectedSymbol: "BTCUSDT" }
+  }), async () => new Response(JSON.stringify({
+    ok: false,
+    code: "EMPTY_FINAL_CONTENT",
+    finishReason: "length",
+    error: "模型在生成最终回答前达到 Token 上限"
+  }), { status: 502, headers: { "content-type": "application/json" } }));
+  const data = await response.json();
+  assert.equal(response.status, 502);
+  assert.equal(data.agent, "SPOTTER");
+  assert.equal(data.providerErrorCode, "EMPTY_FINAL_CONTENT");
+  assert.equal(data.finishReason, "length");
+  assert.equal(data.autoExecution, false);
+});
+
 test("TAKER blocks WATCH and REJECT decisions even if a Kelly size exists", async () => {
   const { computeFractionalKelly, buildTakerPlan } = await modulePromise;
   const kelly = computeFractionalKelly({
