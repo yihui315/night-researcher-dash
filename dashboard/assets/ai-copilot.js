@@ -217,11 +217,13 @@
       $("aiTeamStatus").className = "small-pill ai-status success";
       $("aiTeamOutput").textContent = "六角色流程完成；逐角色结构化结果已写入下方研究记录。TAKER 未自动创建订单。";
       appendMessage("assistant", "安全闸门：" + (data.safety && data.safety.note || "没有自动执行权限") + "\nToken 用量：" + JSON.stringify(data.usage || {}));
+      if (typeof window.NRTradingRefreshAudit === "function") void window.NRTradingRefreshAudit();
     } catch (error) {
       $("aiTeamStatus").textContent = "连接失败";
       $("aiTeamStatus").className = "small-pill ai-status error";
       $("aiTeamOutput").textContent = "连接失败，未生成订单。";
       appendMessage("assistant", "六 Agent 请求未完成：" + (error.message || "未知错误"));
+      if (typeof window.NRTradingRefreshAudit === "function") void window.NRTradingRefreshAudit();
     } finally {
       busy = false;
       $("aiTeamRun").disabled = false;
