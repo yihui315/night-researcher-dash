@@ -1,3 +1,12 @@
+## 本轮增量（2026-11-02）
+
+- AI 代理响应解析现在接受常见的 Chat Completions 文本块形式（string、text/output_text block），但不会把 `reasoning_content` 当作用户答案。
+- 空最终输出会返回脱敏诊断：finish_reason、content 类型/是否存在、是否含独立 reasoning/tool_calls、token usage；不回传原始推理或密钥。
+- 六角色模型调用的最大最终输出预算提升至 8192 tokens；MiniMax 仍显式关闭 thinking，以便只消费最终结构化文本。
+- Agent 输出现在按角色进行严格字段、枚举和交易对 allowlist 校验；未知交易对、无效 schema 或缺失关键字段立即 fail-closed，不会进入 KELLY/TAKER 或创建订单。
+- JEV adapter 已对接现有 ProviderRegistry 的 list/probe/models 路由；Provider IDs 以 JEV 现有 registry 为准（`typesafe_jev`、`minimax`、`qwen_coding_plan_cn`、`deepseek`、`custom`），Trading Desk 请求只传 providerId，不传 API Key。
+- 这并不表示 JEV 的 `/api/v1/trading/*` 已实现；这些接口仍需在本机 JEV 后端与 React 应用内完成正式集成。
+
 # AI Quant Trading OS — 架构审计与实施基线
 
 版本：V1.2  
