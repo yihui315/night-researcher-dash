@@ -58,6 +58,15 @@ dashboard/
 - **临时/预览**：`workbuddy_sites_deploy` 发布 `dashboard/` 为静态站（已发布，线上链接见对话）；但这是静态快照，重跑 `run_research.py` 后需手动重新部署。
 - **无人值守（推荐）**：见 **`部署指南.md`** —— 把本目录作为仓库推到 GitHub，Cloudflare Pages 连通仓库（Build output directory = `dashboard`），由 `.github/workflows/night-researcher.yml` 每天 UTC 16:00 自动重跑 `run_research.py` 并推送 `research.json`，**Pages 自动重新部署**，线上随即为最新。RUNES / 爆仓 真实数据只需在仓库 Secrets 填入 `UNISAT_API_KEY` / `DUNE_API_KEY`(+`DUNE_RUNES_QUERY_ID`) / `COINGLASS_API_KEY` 即自动启用，无需改代码。
 
+## 3.3 AI Quant Trading 工作台（开发分支预览）
+
+- **AI API 独立输入页**：`/ai-settings.html`。可配置 MiniMax M3 或 Qwen Coder，填写区域、Workspace ID 和 API Key，并点击「测试 API 连接」。
+- **交易终端**：`/trading.html`。提供实时行情、K线、diff-depth 盘口、逐笔成交、模拟账户和 AI 六角色研究入口。
+- **研究首页**：`/index.html`。顶部提供交易终端与 AI API 设置快捷入口。
+- **本地预览**：`cd dashboard && python -m http.server 8765`，访问 `http://localhost:8765/ai-settings.html` 或 `http://localhost:8765/trading.html`。
+- MiniMax 使用对应中国站 / 国际站的 API Key；Qwen 使用与 Workspace / 区域匹配的 Model Studio 通用 API Key。不要把 API Key 粘贴到聊天、提交到 Git 或写入浏览器存储。
+- 设置页只负责配置和连接测试；要让六角色团队读取真实页面行情快照，请从交易终端运行研究。所有模型输出均为研究提案，不能直接下单。
+
 ## 4. 研究重点：BRC20 / RUNES
 
 `brc20_runes_monitor.py` 用 **Bitcoin 每日网络手续费**（DefiLlama）作为 BRC20/RUNES 生态活跃度代理，叠加 `mempool.space` 实时费率，输出"生态监测"章节（事实+推断分离）。
