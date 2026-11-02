@@ -18,6 +18,7 @@ class FakeD1 {
     this.fills = new Map();
     this.events = [];
     this.seq = 1;
+    this.eventInsertDebug = [];
   }
 
   prepare(sql) {
@@ -125,6 +126,7 @@ class FakeD1 {
     }
     if (sql.startsWith("INSERT OR IGNORE INTO paper_server_events") && sql.includes("SELECT")) {
       const [sid, eventId, commandId, eventType, payloadJson, createdAt, guardSid, version, guardCommand] = args;
+      this.eventInsertDebug.push({ sid, eventId, commandId, eventType, guardSid, version, guardCommand, account: this.accounts.get(guardSid) });
       const schemaVersion = 1;
       const account = this.accounts.get(guardSid);
       if (!account || Number(account.version) !== Number(version) || account.last_command_id !== guardCommand) return { success: true, meta: { changes: 0 } };
@@ -270,7 +272,7 @@ test("market order re-reads Binance depth and exchange filters on the server, th
   assert.ok(fetcher.calls.some(call => call.includes("/depth?symbol=BTCUSDT")));
   assert.ok(fetcher.calls.some(call => call.includes("/exchangeInfo?symbol=BTCUSDT")));
   assert.ok(fetcher.calls.some(call => call.includes("/ticker/price?symbols=")));
-  assert.ok(env.PAPER_DB.events.some(event => event.event_type === "paper.server.order.filled"));
+  assert.ok(env.PAPER_DB.events.some(event => event.event_type === "paper.server.order.filled"), JSON.stringify({ events: env.PAPER_DB.events, debug: env.PAPER_DB.eventInsertDebug }));
 });
 
 test("client book, account and fill fields are rejected; browser cannot forge the server execution inputs", async () => {
@@ -395,7 +397,7 @@ test("event replay verifies the hash-linked account snapshots and returns the re
   const response = await handlePaperReplay(makeRequest("https://nr.example/api/paper/replay", "GET", cookie), env);
   const data = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(data.verified, true);
+  assert.equal(data.verified, true, JSON.stringify({ data, events: env.PAPER_DB.events, debug: env.PAPER_DB.eventInsertDebug }));
   assert.equal(data.snapshots, 2);
   assert.equal(data.account.cash, 9499.5);
   const events = await handlePaperServerEvents(makeRequest("https://nr.example/api/paper/events?after=0&limit=100", "GET", cookie), env);
@@ -415,7 +417,7 @@ test("server risk rejection is persisted as an immutable order and risk event", 
   assert.match(data.order.reason, /单笔风险上限/);
   assert.equal(env.PAPER_DB.orders.size, 1);
   assert.equal(env.PAPER_DB.fills.size, 0);
-  assert.ok(env.PAPER_DB.events.some(event => event.event_type === "paper.server.order.rejected"));
+  assert.ok(env.PAPER_DB.events.some(event => event.event_type === "paper.server.order.rejected"), JSON.stringify({ events: env.PAPER_DB.events, debug: env.PAPER_DB.eventInsertDebug }));
 });
 
 test("paper server routes fail closed without D1 or a strong signing secret", async () => {
@@ -435,5 +437,5 @@ test("pure server execution helpers reject unsorted books and invalid exchange q
   const walk = __test.walkBook([[100, 0.002], [101, 0.003]], 0.004);
   assert.equal(walk.filledQty, 0.004);
   assert.equal(walk.remainingQty, 0);
-  assert.equal(walk.avgPrice, 100.25);
+  assert.equal(walk.avgPrice, 100.5);
 });
