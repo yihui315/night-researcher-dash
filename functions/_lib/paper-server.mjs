@@ -691,7 +691,14 @@ export async function handlePaperOrders(request, env) {
     const duplicate = await findOrderByClientId(db, auth.sessionId, input.clientOrderId);
     if (duplicate) {
       if (duplicate.request_hash !== requestHash) return json({ ok: false, code: "IDEMPOTENCY_CONFLICT", error: "同一 clientOrderId 不得用于不同订单参数" }, 409);
-      return json({ ...(await accountResponse(db, auth.sessionId, env)), duplicate: true, orderId: duplicate.order_id, orderStatus: duplicate.status });
+      const restored = await accountResponse(db, auth.sessionId, env);
+      const existingOrder = restored.account.orders.find(order => order.clientOrderId === input.clientOrderId) || null;
+      return json({
+        ...restored, duplicate: true, order: existingOrder,
+        orderId: duplicate.order_id, orderStatus: duplicate.status,
+        accepted: duplicate.status !== "REJECTED",
+        rejection: duplicate.status === "REJECTED" ? { code: duplicate.rejection_code, reason: duplicate.rejection_reason } : null
+      });
     }
 
     const row = await ensureAccount(db, auth.sessionId);
@@ -739,7 +746,14 @@ export async function handlePaperOrders(request, env) {
     if (!committed.committed) {
       const raced = await findOrderByClientId(db, auth.sessionId, input.clientOrderId);
       if (raced && raced.request_hash === requestHash) {
-        return json({ ...(await accountResponse(db, auth.sessionId, env)), duplicate: true, orderId: raced.order_id, orderStatus: raced.status });
+        const restored = await accountResponse(db, auth.sessionId, env);
+        const existingOrder = restored.account.orders.find(order => order.clientOrderId === input.clientOrderId) || null;
+        return json({
+          ...restored, duplicate: true, order: existingOrder,
+          orderId: raced.order_id, orderStatus: raced.status,
+          accepted: raced.status !== "REJECTED",
+          rejection: raced.status === "REJECTED" ? { code: raced.rejection_code, reason: raced.rejection_reason } : null
+        });
       }
       return json({ ok: false, code: "ACCOUNT_VERSION_CONFLICT", error: "账户在订单处理期间已变化，请刷新账户后重试" }, 409);
     }
@@ -922,13 +936,17 @@ export async function handlePaperAccountReset(request, env) {
   }
   const db = env.PAPER_DB;
   try {
+    const commandId = "reset:" + body.clientActionId;
+    const prior = await db.prepare(
+      "SELECT event_id FROM paper_server_events WHERE session_id = ? AND event_id = ?"
+    ).bind(auth.sessionId, commandId + ":paper.server.account.reset:0").first();
+    if (prior) return json({ ...(await accountResponse(db, auth.sessionId, env)), duplicate: true });
     const row = await ensureAccount(db, auth.sessionId);
     const current = accountFromRow(row);
     const account = createAccount();
     account.version = current.version + 1;
     account.generation = Number(current.account.generation || 1) + 1;
     account.createdAt = current.account.createdAt;
-    const commandId = "reset:" + body.clientActionId;
     const committed = await commitState(db, auth.sessionId, current, account, commandId, {
       events: [{ eventType: "paper.server.account.reset", payload: { generation: account.generation, confirmationId: body.confirmationId, reason: "user-confirmed-reset" } }]
     });
