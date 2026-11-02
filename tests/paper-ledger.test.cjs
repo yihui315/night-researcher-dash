@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { handlePaperSession, handlePaperLedger } = require("../functions/_lib/paper-ledger.mjs");
+const { handlePaperSession, handlePaperLedger, appendTrustedEvent } = require("../functions/_lib/paper-ledger.mjs");
 
 class FakeD1 {
   constructor() { this.sessions = new Map(); this.events = []; this.seq = 1; }
@@ -109,6 +109,31 @@ test("latest account snapshot query ignores newer unrelated agent events", async
   assert.equal(data.events.length, 1);
   assert.equal(data.events[0].eventType, "paper.account.snapshot");
   assert.deepEqual(data.events[0].payload.account, { cash: 9000 });
+});
+
+test("trusted agent audit events are server-written and cannot be forged through the client ledger route", async () => {
+  const e = env();
+  const session = await handlePaperSession(request("https://nr.example/api/paper/session", "POST"), e);
+  const cookie = cookieFrom(session);
+  const trusted = await appendTrustedEvent(
+    request("https://nr.example/api/agents/research", "POST", cookie, { placeholder: true }),
+    e,
+    { eventId: "agent.run.started:12345678", eventType: "agent.run.started", payload: { runId: "12345678" } }
+  );
+  assert.equal(trusted, true);
+  assert.equal(e.PAPER_DB.events.length, 1);
+  assert.equal(e.PAPER_DB.events[0].event_type, "agent.run.started");
+
+  const forged = await handlePaperLedger(
+    request("https://nr.example/api/paper/ledger", "POST", cookie, {
+      eventId: "agent.run.completed:12345678",
+      eventType: "agent.run.completed",
+      payload: { runId: "12345678" }
+    }),
+    e
+  );
+  assert.equal(forged.status, 400);
+  assert.equal(e.PAPER_DB.events.length, 1);
 });
 
 test("rejects cross-origin writes, unsupported events, and oversized payloads", async () => {
