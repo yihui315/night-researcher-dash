@@ -66,6 +66,7 @@ dashboard/
 - **研究可追踪**：六 Agent API 返回 `runId`、`snapshotHash`、prompt version、provider/model、耗时和 token usage；交易页将研究开始/完成/失败事件与模拟账户快照写入同一会话账本。
 - **信任边界**：当前 D1 是浏览器生成快照的审计/恢复日志，不是权威执行账本；不能作为 Kelly、策略晋级或实盘授权依据。服务端确定性模拟撮合仍是下一阶段。
 - **D1 配置指南**：`docs/CLOUDFLARE_D1_PAPER_LEDGER_SETUP.md`。
+- **JEV Trading Desk 适配器**：`integration/jev/tradingApi.mjs` + `.d.ts`，同源访问 JEV `/api/health` 与规划中的 `/api/v1/trading/*`；配套 WorkBuddy 本机集成 SOP：`docs/WORKBUDDY_JEV_TRADING_DESK_INTEGRATION.md`。适配器已单元测试，但 JEV 本机路由和 React 页面尚未写入。
 - **研究首页**：`/index.html`。顶部提供交易终端与 AI API 设置快捷入口。
 - **本地预览**：`cd dashboard && python -m http.server 8765`，访问 `http://localhost:8765/ai-settings.html` 或 `http://localhost:8765/trading.html`。
 - MiniMax 使用对应中国站 / 国际站的 API Key；Qwen 使用与 Workspace / 区域匹配的 Model Studio 通用 API Key。不要把 API Key 粘贴到聊天、提交到 Git 或写入浏览器存储。
