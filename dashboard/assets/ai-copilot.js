@@ -195,11 +195,11 @@
       });
       const data = await response.json();
       if (!response.ok || !data.ok) {
-        logResearchEvent("agent.run.failed", { runId: data.runId || runId, snapshotHash: data.snapshotHash || null, provider: config.provider, model: config.model, failedAgent: data.agent || null, error: data.error || "研究请求失败", partial: data.partial || {}, completedAt: new Date().toISOString() });
+        logResearchEvent("agent.run.failed", { runId: data.runId || runId, snapshotHash: data.snapshotHash || null, provider: config.provider, model: config.model, failedAgent: data.agent || null, error: data.error || "研究请求失败", providerErrorCode: data.providerErrorCode || null, finishReason: data.finishReason || null, partial: data.partial || {}, completedAt: new Date().toISOString() });
         $("aiTeamStatus").textContent = "流程未完成";
         $("aiTeamStatus").className = "small-pill ai-status error";
         $("aiTeamOutput").textContent = "流程中止，未生成订单。";
-        appendMessage("assistant", "六 Agent 流程中止：" + (data.error || "请求失败") + (data.agent ? " · 阻塞角色 " + data.agent : ""));
+        appendMessage("assistant", "六 Agent 流程中止：" + (data.error || "请求失败") + (data.agent ? " · 阻塞角色 " + data.agent : "") + (data.providerErrorCode ? " · 错误码 " + data.providerErrorCode : "") + (data.finishReason ? " · finish_reason " + data.finishReason : ""));
         if (data.partial) appendMessage("assistant", "已完成的角色结果：\n" + JSON.stringify(data.partial, null, 2));
         return;
       }
