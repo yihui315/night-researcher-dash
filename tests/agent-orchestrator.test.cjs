@@ -99,6 +99,12 @@ test("six-role pipeline calls four AI roles and keeps execution disabled", async
   }), aiHandler);
   const data = await response.json();
   assert.equal(response.status, 200);
+  assert.match(data.runId, /^[0-9a-f-]{36}$/i);
+  assert.match(data.snapshotHash, /^[0-9a-f]{64}$/);
+  assert.equal(data.promptVersion, "nr-agent-research-v1");
+  assert.equal(data.provider, "minimax");
+  assert.equal(data.requestedModel, "MiniMax-M3");
+  assert.ok(data.durationMs >= 0);
   assert.deepEqual(calls, ["SPOTTER", "PRIOR", "EDGE", "CLOSER"]);
   assert.deepEqual(data.roles, ["SPOTTER", "PRIOR", "EDGE", "KELLY", "TAKER", "CLOSER"]);
   assert.equal(data.outputs.KELLY.status, "BLOCKED");
