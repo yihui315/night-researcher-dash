@@ -7,7 +7,7 @@
     { symbol: "ORDIUSDT", label: "ORDI" }, { symbol: "1000SATSUSDT", label: "1000SATS" }
   ];
   const INTERVALS = { "1m": 60, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 };
-  const state = { symbol: "BTCUSDT", interval: "4h", side: "BUY", tickers: {}, book: { bids: [], asks: [] }, bookUpdatedAt: 0, klines: [], trades: [], socket: null, socketReady: false, reconnectTimer: null, socketGeneration: 0, chart: null, candleSeries: null, lastBar: null, account: window.NRPaper.loadAccount(), marks: {}, restTimer: null };
+  const state = { symbol: "BTCUSDT", interval: "4h", side: "BUY", tickers: {}, book: { bids: [], asks: [] }, bookUpdatedAt: 0, klines: [], trades: [], socket: null, socketReady: false, reconnectTimer: null, socketGeneration: 0, depthBook: window.NRDepthBook.create(20), depthBuffer: [], depthSynced: false, depthResyncing: false, chart: null, candleSeries: null, lastBar: null, account: window.NRPaper.loadAccount(), marks: {}, restTimer: null };
   const $ = id => document.getElementById(id);
   const money = n => Number(n || 0).toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const num = (n, d) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: d == null ? 6 : d });
@@ -340,19 +340,95 @@
   };
 
   window.NRTradingSelectSymbol = selectSymbol;
+  function publishSequencedBook() {
+    const snapshot = window.NRDepthBook.levels(state.depthBook);
+    state.book = { bids: snapshot.bids, asks: snapshot.asks };
+    state.bookUpdatedAt = Date.now();
+    renderBook();
+    const updates = window.NRPaper.processOpenOrders(state.account, state.symbol, state.book, marks());
+    if (updates.length) persist();
+    renderAccount();
+  }
+
+  async function syncDepthSnapshot(activeSymbol, generation, ws) {
+    if (state.depthResyncing) return;
+    state.depthResyncing = true;
+    try {
+      const snapshot = await getJSON(API + "/depth?symbol=" + activeSymbol + "&limit=1000");
+      if (state.socket !== ws || state.socketGeneration !== generation || state.symbol !== activeSymbol) return;
+      window.NRDepthBook.loadSnapshot(state.depthBook, snapshot);
+      const buffered = state.depthBuffer.splice(0);
+      for (let i = 0; i < buffered.length; i++) {
+        const result = window.NRDepthBook.applyDiff(state.depthBook, buffered[i]);
+        if (result.status === "gap") {
+          state.depthBuffer = buffered.slice(i);
+          state.depthSynced = false;
+          state.depthResyncing = false;
+          setConnection("盘口序列出现缺口 · 正在重新同步", true);
+          void syncDepthSnapshot(activeSymbol, generation, ws);
+          return;
+        }
+      }
+      state.depthSynced = state.depthBook.synced;
+      publishSequencedBook();
+      if (state.depthSynced && state.socketReady) setConnection("WebSocket 实时行情 · 盘口序列同步", false);
+    } catch (_) {
+      if (state.socket === ws && state.socketGeneration === generation) {
+        state.depthSynced = false;
+        setConnection("盘口同步失败 · REST 备用", true);
+        setTimeout(() => {
+          if (state.socket === ws && state.socketGeneration === generation && !state.depthSynced) {
+            state.depthResyncing = false;
+            void syncDepthSnapshot(activeSymbol, generation, ws);
+          }
+        }, 2500);
+      }
+    } finally {
+      state.depthResyncing = false;
+    }
+  }
+
+  function receiveDepthDiff(event, activeSymbol, generation, ws) {
+    if (state.socket !== ws || state.socketGeneration !== generation || state.symbol !== activeSymbol) return;
+    if (!state.depthSynced) {
+      state.depthBuffer.push(event);
+      if (state.depthBuffer.length > 2000) {
+        state.depthBuffer = [event];
+        state.depthBook.synced = false;
+        state.depthResyncing = false;
+        void syncDepthSnapshot(activeSymbol, generation, ws);
+      }
+      return;
+    }
+    const result = window.NRDepthBook.applyDiff(state.depthBook, event);
+    if (result.status === "gap") {
+      state.depthSynced = false;
+      state.depthBuffer = [event];
+      setConnection("盘口序列出现缺口 · 正在重新同步", true);
+      void syncDepthSnapshot(activeSymbol, generation, ws);
+    } else if (result.status === "applied") {
+      publishSequencedBook();
+    }
+  }
+
   function connectSocket() {
     if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
     const activeSymbol = state.symbol;
     const generation = ++state.socketGeneration;
     const s = activeSymbol.toLowerCase();
-    const streams = [s + "@ticker", s + "@depth20@100ms", s + "@trade"].join("/");
+    state.depthBook = window.NRDepthBook.create(20);
+    state.depthBuffer = [];
+    state.depthSynced = false;
+    state.depthResyncing = false;
+    const streams = [s + "@ticker", s + "@depth@100ms", s + "@trade"].join("/");
     try {
       const ws = new WebSocket("wss://stream.binance.com:9443/stream?streams=" + streams);
       state.socket = ws; state.socketReady = false;
       ws.onopen = () => {
         if (state.socket !== ws || state.socketGeneration !== generation) return;
         state.socketReady = true;
-        setConnection("WebSocket 实时行情", false);
+        setConnection("WebSocket 已连接 · 正在同步盘口", false);
+        void syncDepthSnapshot(activeSymbol, generation, ws);
       };
       ws.onmessage = event => {
         try {
@@ -360,12 +436,11 @@
           if (d.e === "24hrTicker") updateTicker(d.s, { price: d.c, change: d.P, quoteVolume: d.q });
           else if (d.e === "trade") {
             state.trades.unshift({ price: Number(d.p), qty: Number(d.q), time: Number(d.T), buyerMaker: !!d.m });
-            if (state.trades.length > 40) state.trades.length = 40; renderTape();
-          } else if (d.bids && d.asks) {
-            state.book = { bids: d.bids, asks: d.asks }; state.bookUpdatedAt = Date.now(); renderBook();
-            const updates = window.NRPaper.processOpenOrders(state.account, state.symbol, state.book, marks());
-            if (updates.length) persist();
-            renderAccount();
+            if (state.trades.length > 40) state.trades.length = 40;
+            renderTape();
+            updateLiveCandle(Number(d.p));
+          } else if (d.e === "depthUpdate" && Array.isArray(d.b) && Array.isArray(d.a)) {
+            receiveDepthDiff(d, activeSymbol, generation, ws);
           }
           setText("lastUpdate", "更新 " + new Date().toLocaleTimeString("zh-CN", { hour12: false }));
         } catch (_) {}
@@ -379,12 +454,17 @@
         if (state.socket === ws) state.socket = null;
         if (state.socketGeneration !== generation || state.symbol !== activeSymbol) return;
         state.socketReady = false;
+        state.depthSynced = false;
+        state.depthBuffer = [];
+        state.depthResyncing = false;
         setConnection("REST 备用 · 等待重连", true);
         state.reconnectTimer = setTimeout(() => {
           if (state.symbol === activeSymbol && state.socketGeneration === generation) connectSocket();
         }, 4000);
       };
-    } catch (_) { setConnection("REST 备用", true); }
+    } catch (_) {
+      setConnection("REST 备用", true);
+    }
   }
   async function restFallback() {
     try {
