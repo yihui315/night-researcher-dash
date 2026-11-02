@@ -42,6 +42,28 @@ test.beforeEach(async ({ page }) => {
         : { error: "missing API key" })
     });
   });
+  await page.route("**/api/agents/research", async route => {
+    const payload = route.request().postDataJSON();
+    const valid = !!payload.apiKey && !!payload.snapshot;
+    await route.fulfill({
+      status: valid ? 200 : 400,
+      contentType: "application/json",
+      body: JSON.stringify(valid ? {
+        ok: true,
+        roles: ["SPOTTER", "PRIOR", "EDGE", "KELLY", "TAKER", "CLOSER"],
+        outputs: {
+          SPOTTER: { title: "机会发现", opportunities: [] },
+          PRIOR: { title: "市场先验", regime: "unknown", evidence: [] },
+          EDGE: { title: "优势验证", verdict: "WATCH", invalidation: "OOS 失效" },
+          KELLY: { status: "BLOCKED", allocationPct: 0 },
+          TAKER: { status: "BLOCKED", autoSubmit: false },
+          CLOSER: { title: "退出与复盘", decision: "HOLD_RESEARCH", exit_conditions: [] }
+        },
+        usage: { total_tokens: 60 },
+        safety: { autoExecution: false, note: "无自动下单权限" }
+      } : { error: "missing API key or snapshot" })
+    });
+  });
   await page.goto("/trading.html");
 });
 
@@ -95,4 +117,17 @@ test("MiniMax and Qwen key forms call the same-origin AI endpoint without persis
   const stored = await page.evaluate(() => JSON.stringify(localStorage));
   expect(stored).not.toContain("mm-browser-test-key-123456");
   expect(stored).not.toContain("sk-browser-test-key-123456");
+});
+
+test("AI Provider Center is visible and the six-agent flow never persists keys", async ({ page }) => {
+  await expect(page.locator("#aiProviderCenter")).toBeVisible();
+  await expect(page.locator("#aiProvider")).toBeVisible();
+  await expect(page.locator("#minimaxApiKey")).toBeVisible();
+  await page.locator("#minimaxApiKey").fill("mm-team-browser-test-key-123456");
+  await page.locator("#aiTeamRun").click();
+  await expect(page.locator("#aiTeamStatus")).toContainText("流程完成");
+  await expect(page.locator("#aiOutput")).toContainText("SPOTTER");
+  await expect(page.locator("#aiOutput")).toContainText("KELLY");
+  const stored = await page.evaluate(() => JSON.stringify(localStorage));
+  expect(stored).not.toContain("mm-team-browser-test-key-123456");
 });
