@@ -180,7 +180,7 @@ Live Trading：
 
 当前缺口：
 - 本仓库仍有静态 HTML 原型；尚未将页面迁入 JEV React Router/组件体系。
-- 本次开发新增 Provider Center 顶部入口只是 Night Researcher 预览页面的临时可发现性修复，不代表 JEV 已完成集成。
+- 已新增独立 `dashboard/ai-settings.html`，并在交易终端顶部和研究首页提供直达入口；AI API 设置不再依赖滚动查找侧栏卡片。该页面仍是 Night Researcher 预览站的过渡入口，不代表 JEV 已完成集成。
 - JEV 本地源代码目前不在此 GitHub 仓库/当前连接的远程仓库中；真正挂载 React 页面、调用 JEV Provider Center DPAPI SecretStore、接入 4779 后端，必须在可访问的 JEV 源码上完成并验收。
 
 ## 2. Provider 配置基线
