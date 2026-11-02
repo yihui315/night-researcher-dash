@@ -330,17 +330,31 @@ def _build_cross_validation(brc20_ctx, now_ms, start_ms, oos_ms, fng_pts):
     L.append("- BRC20 两标的同属比特币 L1 铭文生态、相关性高；若两标的 OOS 表现同向，可互为交叉验证；"
              "若严重分化，提示策略对单一代币路径过拟合。详见上方各 vintage 表。\n")
 
-    L.append("### 6.4 交叉验证综合结论（事实，非推断）\n")
-    L.append("- **粒度反转（最关键）**：ORDI 的 BRC20_RSI_MR 样本内 **4h +186.76% 但 1d −57.76%**；"
-             "1000SATS 同样 **4h −32.59% 但 1d +17.68%**。两代币在 4h 与 1d 上结论**方向相反** → "
-             "该策略的「盈利」高度依赖所选时间粒度，是典型的**粒度/参数过拟合**信号，非可迁移 edge。\n")
-    L.append("- **跨 vintage 不一致**：ORDI 三窗 OOS 净收益 +75.6% / +45.4% / **−14.7%**（2 正 1 负）；"
-             "SATS 三窗 +5.5% / +34.5% / **−31.9%**（2 正 1 负）。正负交替，稳健性不成立。\n")
-    L.append("- **结论**：BRC20 上「看似惊艳」的样本内收益（ORDI +175%~+187%、SATS 各有盈亏）"
-             "**未通过跨资产/跨周期/跨 vintage 交叉验证**。框架应维持「不予放行」。"
-             "这正印证原 Prompt『反过拟合』关卡的价值——**单看样本内会被严重误导**。\n")
-    cv["conclusion"] = ("BRC20「看似惊艳」的样本内收益（ORDI +175%~+187%、SATS 各有盈亏）未通过跨资产/跨周期/"
-                        "跨 vintage 交叉验证 → 框架维持「不予放行」。单看样本内会被严重误导。")
+    L.append("### 6.4 交叉验证综合结论（由本次数据动态计算）\n")
+    grain_flip = [
+        row for row in cv["grainFlip"]
+        if row["h4"] != 0 and row["d1"] != 0 and ((row["h4"] > 0) != (row["d1"] > 0))
+    ]
+    wf_folds = [
+        fold
+        for item in cv["walkForward"]
+        for strategy_folds in item["strategies"].values()
+        for fold in strategy_folds
+    ]
+    wf_valid = [fold for fold in wf_folds if fold["status"] == "VALIDATED" and fold["net"] is not None]
+    wf_positive = sum(1 for fold in wf_valid if fold["net"] > 0)
+    wf_negative = sum(1 for fold in wf_valid if fold["net"] <= 0)
+    wf_no_train = sum(1 for fold in wf_folds if fold["status"] == "NO_TRAIN_EDGE")
+    L.append(f"- **多周期方向反转**：{len(grain_flip)}/{len(cv['grainFlip'])} 个资产在 4h 与 1d 样本内方向相反。")
+    L.append(f"- **严格 Walk-forward**：{len(wf_valid)} 个 fold 有独立 OOS 成交；{wf_positive} 个为正、{wf_negative} 个非正；{wf_no_train} 个 fold 因训练期没有正 edge 而停止选参。")
+    if not wf_valid:
+        conclusion = "当前没有足够的独立 Walk-forward OOS 成交，策略维持未放行。"
+    elif wf_negative > 0 or grain_flip:
+        conclusion = "Walk-forward 或多周期验证仍存在负收益/方向反转，策略维持未放行。"
+    else:
+        conclusion = "本轮 Walk-forward 和多周期检查未发现负向 fold；仍需结合样本量、成本、Monte Carlo 与人工审查，不能自动晋级。"
+    L.append("- **结论**：" + conclusion + "\n")
+    cv["conclusion"] = conclusion
     return "\n".join(L), cv
 
 
