@@ -7,8 +7,7 @@
     { symbol: "ORDIUSDT", label: "ORDI" }, { symbol: "1000SATSUSDT", label: "1000SATS" }
   ];
   const INTERVALS = { "1m": 60, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 };
-  const hasLocalPaperAccount = (() => { try { return !!localStorage.getItem(window.NRPaper.STORAGE_KEY); } catch (_) { return false; } })();
-  const state = { localAccountPresent: hasLocalPaperAccount, symbol: "BTCUSDT", interval: "4h", side: "BUY", tickers: {}, book: { bids: [], asks: [] }, bookUpdatedAt: 0, klines: [], trades: [], socket: null, socketReady: false, reconnectTimer: null, socketGeneration: 0, depthBook: window.NRDepthBook.create(20), depthBuffer: [], depthSynced: false, depthResyncing: false, chart: null, candleSeries: null, lastBar: null, account: window.NRPaper.loadAccount(), marks: {}, restTimer: null, ledger: window.NRPaperLedger.createClient() };
+  const state = { symbol: "BTCUSDT", interval: "4h", side: "BUY", tickers: {}, book: { bids: [], asks: [] }, bookUpdatedAt: 0, klines: [], trades: [], socket: null, socketReady: false, reconnectTimer: null, socketGeneration: 0, depthBook: window.NRDepthBook.create(20), depthBuffer: [], depthSynced: false, depthResyncing: false, chart: null, candleSeries: null, lastBar: null, account: window.NRPaper.createAccount(), marks: {}, restTimer: null, ledger: window.NRPaperLedger.createClient(), serverReady: false, serverBusy: false, serverPollTimer: null };
   const $ = id => document.getElementById(id);
   const money = n => Number(n || 0).toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const num = (n, d) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: d == null ? 6 : d });
@@ -33,49 +32,105 @@
     el.classList.toggle("warning", mode === "warning");
     el.classList.toggle("safe", mode === "ready");
   }
-  function persist(reason) {
-    state.account.updatedAt = new Date().toISOString();
-    state.localAccountPresent = true;
-    window.NRPaper.saveAccount(state.account);
-    renderAccount();
-    if (!state.ledger) return;
-    state.ledger.appendSnapshot(state.account, marks(), reason || "state-change")
-      .then(result => {
-        if (result && result.ok) { setLedgerStatus("服务端备份已同步", "ready"); void refreshAudit(); }
-        else setLedgerStatus("仅本地 · 服务端账本未配置", "warning");
-      })
-      .catch(() => setLedgerStatus("本地缓存 · 云端同步失败", "warning"));
+  async function paperRequest(path, method, body, acceptedStatuses) {
+    const session = await state.ledger.startSession();
+    if (!session || !session.available) throw new Error("服务端权威模拟引擎未配置或不可用；已禁止本地代替下单");
+    const response = await fetch(path, {
+      method: method || "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: body ? { "content-type": "application/json" } : {},
+      ...(body ? { body: JSON.stringify(body) } : {})
+    });
+    let data = {};
+    try { data = await response.json(); } catch (_) {}
+    const allowed = Array.isArray(acceptedStatuses) && acceptedStatuses.includes(response.status);
+    if (!response.ok && !allowed) {
+      const error = new Error(data.error || ("服务端模拟引擎请求失败 HTTP " + response.status));
+      error.status = response.status;
+      error.code = data.code || null;
+      throw error;
+    }
+    return { data, status: response.status };
   }
-  async function syncPaperLedger() {
-    setLedgerStatus("服务端账本连接中", "neutral");
+  function mergeServerAccount(data) {
+    if (!data || !data.account) return false;
+    state.account = data.account;
+    Object.entries(data.marks || {}).forEach(([symbol, price]) => {
+      if (!(Number(price) > 0)) return;
+      const prior = state.tickers[symbol] || { change: 0, quoteVolume: 0 };
+      state.tickers[symbol] = { ...prior, price: Number(price), updatedAt: Date.now() };
+      state.marks[symbol] = Number(price);
+    });
+    state.serverReady = true;
+    renderAccount();
+    return true;
+  }
+  async function bootstrapPaperEngine() {
+    setLedgerStatus("连接服务端权威模拟引擎", "neutral");
     try {
-      const session = await state.ledger.startSession();
-      if (!session.available) {
-        setLedgerStatus("仅本地 · 服务端账本未配置", "warning");
-        return;
+      const result = await paperRequest("/api/paper/account", "GET");
+      if (!mergeServerAccount(result.data)) throw new Error("服务端未返回权威账户状态");
+      setLedgerStatus("服务端权威账本已连接", "ready");
+    } catch (error) {
+      state.serverReady = false;
+      state.account = window.NRPaper.createAccount();
+      setLedgerStatus("服务端引擎不可用 · 已禁止下单", "warning");
+      setFeedback(error.message || "服务端模拟引擎不可用；不会回退到浏览器本地下单", "error");
+      renderAccount();
+    }
+  }
+  async function refreshServerAccount() {
+    if (!state.serverReady || state.serverBusy) return;
+    try {
+      const result = await paperRequest("/api/paper/account", "GET");
+      mergeServerAccount(result.data);
+    } catch (error) {
+      state.serverReady = false;
+      setLedgerStatus("服务端连接中断 · 已禁止下单", "warning");
+      renderAccount();
+    }
+  }
+  async function processServerLimitOrders() {
+    if (!state.serverReady || state.serverBusy) return;
+    const symbols = Array.from(new Set((state.account.orders || [])
+      .filter(order => (order.status === "OPEN" || order.status === "PARTIALLY_FILLED") && Number(order.remainingQty) > 0)
+      .map(order => order.symbol)));
+    if (!symbols.length) return;
+    state.serverBusy = true;
+    try {
+      for (const symbol of symbols) {
+        const result = await paperRequest("/api/paper/market/tick", "POST", { symbol }, [409]);
+        if (result.data && result.data.account) mergeServerAccount(result.data);
+        if (result.data && result.data.updatedOrders && result.data.updatedOrders.length) {
+          setFeedback("服务端限价撮合已更新：" + result.data.updatedOrders.map(order => order.id + " " + order.status).join("、"), "success");
+        }
       }
-      const remote = await state.ledger.latestSnapshot();
-      if (!remote) {
-        const result = await state.ledger.appendSnapshot(state.account, marks(), "session-bootstrap");
-        setLedgerStatus(result && result.ok ? "服务端备份已同步" : "仅本地 · 服务端账本未配置", result && result.ok ? "ready" : "warning");
-        return;
-      }
-      const localTime = Date.parse(state.account.updatedAt || state.account.createdAt || 0) || 0;
-      const remoteTime = Date.parse(remote.account.updatedAt || remote.account.createdAt || remote.event.createdAt || 0) || 0;
-      if (!state.localAccountPresent || remoteTime > localTime) {
-        state.account = remote.account;
-        state.localAccountPresent = true;
-        window.NRPaper.saveAccount(state.account);
-        renderAccount();
-        setLedgerStatus("已从服务端恢复模拟账户", "ready");
-      } else if (localTime > remoteTime) {
-        const result = await state.ledger.appendSnapshot(state.account, marks(), "local-newer-than-server");
-        setLedgerStatus(result && result.ok ? "本地状态已备份" : "仅本地 · 云端同步失败", result && result.ok ? "ready" : "warning");
-      } else {
-        setLedgerStatus("服务端备份已同步", "ready");
-      }
+      void refreshAudit();
     } catch (_) {
-      setLedgerStatus("本地缓存 · 云端同步失败", "warning");
+      // A failed market tick is fail-closed; the next fresh server snapshot may retry.
+    } finally {
+      state.serverBusy = false;
+    }
+  }
+  async function verifyPaperReplay() {
+    const button = $("replayPaperBtn");
+    if (button) button.disabled = true;
+    try {
+      const result = await paperRequest("/api/paper/replay", "GET");
+      const data = result.data;
+      if (!data.verified) throw new Error("服务端事件回放校验未通过：" + (data.error || "EVENT_REPLAY_MISMATCH"));
+      if (data.account) {
+        state.account = data.account;
+        renderAccount();
+      }
+      setLedgerStatus("回放校验通过 · " + data.snapshots + " 个状态快照", "ready");
+      setFeedback("服务端账本回放验证通过；当前账户版本 " + data.replayedVersion + "。", "success");
+    } catch (error) {
+      setLedgerStatus("回放校验失败", "warning");
+      setFeedback(error.message || "服务端事件回放失败", "error");
+    } finally {
+      if (button) button.disabled = false;
     }
   }
   async function refreshAudit() {
@@ -83,14 +138,22 @@
     const empty = $("auditEmpty");
     if (!container || !empty || !state.ledger) return;
     container.replaceChildren();
-    empty.textContent = "正在读取服务端审计事件…";
+    empty.textContent = "正在读取服务端审计与模拟交易事件…";
     try {
-      const data = await state.ledger.readLatestEvents(100);
-      if (!data || !data.ok || data.available === false) {
-        empty.textContent = "服务端审计未启用：当前仅本地模拟。配置 D1 binding PAPER_DB 与 PAPER_LEDGER_SECRET 后可保存研究运行记录。";
+      const [legacyResult, serverResult] = await Promise.allSettled([
+        state.ledger.readLatestEvents(100),
+        state.serverReady ? paperRequest("/api/paper/events?after=0&limit=100", "GET") : Promise.resolve({ data: { events: [] } })
+      ]);
+      const legacy = legacyResult.status === "fulfilled" ? legacyResult.value : null;
+      const server = serverResult.status === "fulfilled" ? serverResult.value.data : null;
+      const events = [
+        ...(legacy && legacy.ok && Array.isArray(legacy.events) ? legacy.events : []),
+        ...(server && server.ok && Array.isArray(server.events) ? server.events : [])
+      ].sort((a, b) => (Date.parse(a.createdAt || 0) || 0) - (Date.parse(b.createdAt || 0) || 0));
+      if (!events.length) {
+        empty.textContent = state.serverReady ? "尚无服务端研究运行或模拟交易事件。" : "服务端审计不可用；当前账户只读，禁止本地下单。";
         return;
       }
-      const events = Array.isArray(data.events) ? data.events : [];
       const runs = new Map();
       const other = [];
       for (const event of events) {
@@ -129,31 +192,51 @@
         ...Array.from(runs.values()).map(run => ({
           title: "六角色研究 · " + run.status,
           meta: [run.provider, run.model, run.durationMs != null ? (run.durationMs / 1000).toFixed(1) + "s" : null, run.tokens != null ? run.tokens + " tokens" : null, run.failedAgent ? "阻塞角色 " + run.failedAgent : null].filter(Boolean).join(" · "),
-          id: run.id,
-          status: run.status,
-          time: run.timestamp,
-          detail: run.error
+          id: run.id, status: run.status, time: run.timestamp, detail: run.error
         })),
-        ...other.slice(-20).map(event => {
+        ...other.slice(-40).map(event => {
           const p = event.payload || {};
           if (event.eventType === "paper.account.snapshot") {
             const account = p.account || {};
-            return { title: "模拟账户快照", meta: [p.reason || "状态更新", Number.isFinite(Number(account.cash)) ? "现金 $" + Number(account.cash).toFixed(2) : null, Array.isArray(account.trades) ? account.trades.length + " 笔成交" : null].filter(Boolean).join(" · "), id: event.eventId, status: "已备份", time: event.createdAt };
+            return { title: "旧版浏览器账户快照", meta: [p.reason || "状态更新", Number.isFinite(Number(account.cash)) ? "现金 $" + Number(account.cash).toFixed(2) : null].filter(Boolean).join(" · "), id: event.eventId, status: "非权威", time: event.createdAt };
           }
           if (event.eventType === "risk.decision") {
             return { title: "风险决策 · " + (p.decision || "BLOCKED"), meta: ["Kelly " + (p.kellyStatus || "BLOCKED"), "仓位 " + (Number(p.allocationPct || 0)).toFixed(2) + "%", p.autoSubmit ? "自动提交" : "禁止自动提交"].join(" · "), id: p.runId || event.eventId, status: p.decision === "APPROVED" ? "待人工确认" : p.decision === "PROPOSAL_ONLY" ? "仅提案" : "已拦截", time: event.createdAt };
+          }
+          if (event.eventType === "paper.server.order.created") {
+            const o = p.order || {};
+            return { title: "服务端模拟委托 · " + (o.status || "已创建"), meta: [o.symbol, o.side, o.type, "数量 " + num(o.qty, 8), o.bookSequence ? "盘口序列 " + o.bookSequence : null].filter(Boolean).join(" · "), id: o.id || event.eventId, status: o.status || "已记录", time: event.createdAt };
+          }
+          if (event.eventType === "paper.server.order.filled") {
+            const f = p.fill || {};
+            return { title: "服务端模拟成交", meta: [f.symbol, f.side, num(f.qty, 8), "@" + priceFmt(f.price), "手续费 " + money(f.fee), f.bookSequence ? "序列 " + f.bookSequence : null].filter(Boolean).join(" · "), id: f.id || event.eventId, status: "已撮合", time: event.createdAt };
+          }
+          if (event.eventType === "paper.server.order.rejected") {
+            const o = p.order || {};
+            return { title: "服务端风险拒绝", meta: [o.symbol, o.side, p.reason || o.reason || "订单被拒绝"].join(" · "), id: o.id || event.eventId, status: "已拒绝", time: event.createdAt };
+          }
+          if (event.eventType === "paper.server.order.cancelled") {
+            const o = p.order || {};
+            return { title: "服务端模拟撤单", meta: [o.symbol, o.side, o.id].filter(Boolean).join(" · "), id: o.id || event.eventId, status: "已撤单", time: event.createdAt };
+          }
+          if (event.eventType === "paper.server.order.updated") {
+            const o = p.order || {};
+            return { title: "服务端限价单更新", meta: [o.symbol, o.status, "累计成交 " + num(o.filledQty, 8), "剩余 " + num(o.remainingQty, 8)].join(" · "), id: o.id || event.eventId, status: o.status || "已更新", time: event.createdAt };
+          }
+          if (event.eventType === "paper.server.account.snapshot") {
+            const a = p.account || {};
+            return { title: "服务端权威账户快照", meta: ["版本 " + (p.version || a.version || "—"), "现金 " + money(a.cash), "持仓 " + Object.keys(a.positions || {}).length + " 个", "哈希 " + String(p.stateHash || "").slice(0, 12)].join(" · "), id: event.eventId, status: "已持久化", time: event.createdAt };
+          }
+          if (event.eventType === "paper.server.account.reset") {
+            return { title: "模拟账户重置", meta: "用户确认 · 新账户代次 " + p.generation, id: event.eventId, status: "已重置", time: event.createdAt };
           }
           if (event.eventType === "strategy.gate.rejected" || event.eventType === "strategy.gate.passed") {
             return { title: "策略门禁 · " + (event.eventType.endsWith("passed") ? "通过" : "拒绝"), meta: String(p.reason || p.strategyId || "策略验证结果"), id: event.eventId, status: event.eventType.endsWith("passed") ? "通过" : "拒绝", time: event.createdAt };
           }
           return { title: String(event.eventType || "事件"), meta: "服务端审计事件", id: event.eventId, status: "已记录", time: event.createdAt };
         })
-      ].sort((a, b) => (Date.parse(b.time || 0) || 0) - (Date.parse(a.time || 0) || 0)).slice(0, 12);
+      ].sort((a, b) => (Date.parse(b.time || 0) || 0) - (Date.parse(a.time || 0) || 0)).slice(0, 16);
 
-      if (!rows.length) {
-        empty.textContent = "尚无研究运行或模拟账户审计记录。";
-        return;
-      }
       empty.textContent = "";
       for (const item of rows) {
         const row = document.createElement("div");
@@ -168,7 +251,7 @@
         const right = document.createElement("div");
         right.className = "audit-right";
         const status = document.createElement("span");
-        status.className = "small-pill " + (item.status === "失败" ? "warning" : item.status === "已完成" || item.status === "已备份" ? "safe" : "");
+        status.className = "small-pill " + (item.status === "失败" || item.status === "已拒绝" ? "warning" : item.status === "已完成" || item.status === "已持久化" || item.status === "已撮合" ? "safe" : "");
         status.textContent = item.status;
         const time = document.createElement("time");
         time.textContent = item.time ? new Date(item.time).toLocaleString("zh-CN", { hour12: false }) : "—";
@@ -185,7 +268,7 @@
         container.append(row);
       }
     } catch (_) {
-      empty.textContent = "审计记录读取失败；本地模拟账户不受影响。";
+      empty.textContent = "审计记录读取失败；服务端交易状态不会回退到浏览器缓存。";
     }
   }
   window.NRTradingRefreshAudit = refreshAudit;
