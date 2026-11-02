@@ -153,3 +153,21 @@ test("MiniMax request uses completion-token controls and does not surface hidden
   assert.equal(data.text, "最终结论");
   assert.doesNotMatch(data.text, /private reasoning|<think>/);
 });
+
+test("Qwen Model Studio supports the documented Hong Kong workspace endpoint", async () => {
+  const { handleAiChat } = await corePromise;
+  let calledUrl = "";
+  const response = await handleAiChat(makeRequest({
+    provider: "qwen",
+    model: "qwen3-coder-next",
+    apiKey: "sk-general-test-123456",
+    region: "hongkong",
+    workspaceId: "ws-hk",
+    messages: [{ role: "user", content: "只回复 AI_READY" }]
+  }), async url => {
+    calledUrl = url;
+    return okResponse();
+  });
+  assert.equal(response.status, 200);
+  assert.equal(calledUrl, "https://ws-hk.cn-hongkong.maas.aliyuncs.com/compatible-mode/v1/chat/completions");
+});
