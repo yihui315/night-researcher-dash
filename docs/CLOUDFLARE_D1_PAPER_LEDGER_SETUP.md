@@ -1,24 +1,32 @@
-# Cloudflare D1 Paper Ledger Setup
+# Cloudflare D1 Server-Authoritative Paper Engine Setup
 
-Status: implementation is in the feature branch. The Pages API intentionally stays in local-only mode until the D1 binding and server signing secret are configured.
+Status: P2 server engine is implemented in the feature branch. The UI fails closed until the D1 binding and signing secret are configured. No live exchange order endpoint exists.
 
-## 1. Create the database
+Cloudflare D1 is SQLite-based storage managed by Cloudflare. It is the deployment-compatible SQLite layer for the Pages Functions runtime; this is not a local SQLite file and does not require a native SQLite package in the Worker.
 
-From the repository root, create a D1 database:
+## 1. Create the database and apply both migrations
+
+From the repository root:
 
 ```bash
 npx wrangler d1 create night-researcher-paper-ledger
 ```
 
-Copy the returned database ID. Apply the schema:
+Copy the returned database ID. Apply both migrations in order:
 
 ```bash
 npx wrangler d1 execute night-researcher-paper-ledger --remote --file=migrations/0001_paper_ledger.sql
+npx wrangler d1 execute night-researcher-paper-ledger --remote --file=migrations/0002_server_paper_engine.sql
 ```
 
-The migration creates:
+The schema contains:
+
 - `paper_sessions`: opaque browser session IDs, expiry and revocation state.
-- `paper_events`: append-only events with per-session idempotency keys and monotonically increasing sequence IDs.
+- `paper_events`: legacy append-only research audit events. Browser-originated snapshots remain untrusted and are not used as the authoritative account.
+- `paper_accounts`: server-owned account state, version and SHA-256 state hash.
+- `paper_orders`: normalized server-validated orders and status transitions; client order IDs are unique per session.
+- `paper_fills`: normalized server-generated fills, unique by order and fill index.
+- `paper_server_events`: append-only server execution events and hash-linked account snapshots used for recovery and replay.
 
 ## 2. Bind D1 to Cloudflare Pages
 
@@ -28,7 +36,10 @@ In Cloudflare Dashboard:
 2. Open **Settings** → **Functions** → **D1 database bindings**.
 3. Add a binding named exactly `PAPER_DB`.
 4. Select `night-researcher-paper-ledger`.
-5. Configure the binding for both Preview and Production environments. Use a separate Preview database if you want isolated test data.
+5. Configure the binding for Preview first. Use a separate Preview database from Production.
+6. Only after Preview acceptance, configure the Production binding.
+
+Do not point an unverified Preview deployment at the Production account database.
 
 ## 3. Add the signing secret
 
@@ -38,28 +49,53 @@ Generate a random secret locally; never commit or paste it into the repository:
 openssl rand -base64 48
 ```
 
-Add it as a Pages environment variable named `PAPER_LEDGER_SECRET` for Preview and Production. Use a value of at least 32 characters. Redeploy the Pages project after changing bindings or variables.
+Add it as a Pages environment variable named `PAPER_LEDGER_SECRET` for Preview. Use a value of at least 32 characters. Redeploy the Pages project after changing bindings or variables. Configure Production separately after Preview passes.
 
-## 4. Endpoints
+## 4. Server API
 
-- `POST /api/paper/session`: creates or reuses a 7-day session. The signed token is set in a `Secure; HttpOnly; SameSite=Strict` cookie scoped to `/api/`, so the trusted research endpoint can append its own audit records.
-- `POST /api/paper/ledger`: append 1–20 allowlisted events. Repeated event IDs are idempotent.
-- `GET /api/paper/ledger?after=0&limit=50`: read events after a sequence cursor.
-- `GET /api/paper/ledger?latest=1&eventType=paper.account.snapshot&limit=1`: recover the newest account snapshot.
+- `POST /api/paper/session`: creates or reuses a 7-day session. The signed token is set in a `Secure; HttpOnly; SameSite=Strict` cookie scoped to `/api/`.
+- `GET /api/paper/account`: returns the server-owned account and server-fetched mark prices. The browser cannot submit an account balance or positions.
+- `POST /api/paper/orders`: accepts only order intent, client idempotency ID and confirmation ID. The server re-reads Binance public depth, exchange filters and ticker marks before validation and deterministic matching.
+- `POST /api/paper/orders/:orderId/cancel`: cancels an open server-side order and releases its reservation.
+- `POST /api/paper/market/tick`: accepts only a whitelisted symbol. The server ignores client market data and fetches a fresh book before attempting limit-order fills.
+- `POST /api/paper/account/reset`: requires explicit client action and confirmation IDs; the reset is recorded and prior server events remain in the audit history.
+- `GET /api/paper/events?after=0&limit=100`: reads the server-generated event stream.
+- `GET /api/paper/replay`: verifies the SHA-256-linked account snapshot chain and reconstructs the latest recoverable account state.
+- `POST /api/paper/ledger` and `GET /api/paper/ledger`: legacy research/audit journal; these events do not control paper account state.
 
-The server enforces same-origin requests, HMAC session signatures, session expiry/revocation, a 150 KB per-event payload cap and a 10,000-event per-session cap. API keys are never part of the ledger contract. The browser endpoint can append paper-account snapshots only; `agent.run.*`, `risk.decision` and `paper.server.order.*` events are reserved for trusted server code.
+The server validates same-origin writes, HMAC session signatures, session expiry, allowlisted symbols, Binance LOT_SIZE/PRICE_FILTER/MIN_NOTIONAL constraints, visible order-book depth, available cash/spot inventory, idempotency and account-version concurrency. The deterministic risk gates remain: 10% per order, 40% maximum marked exposure, 3% UTC daily-loss circuit breaker, 10% account drawdown circuit breaker, no leverage and no naked shorts.
+
+Market orders use IOC-style visible-depth walking. Limit orders reserve cash or spot inventory, can partially fill, and are processed at most once per Binance depth sequence. Every state mutation writes the account version, normalized order/fill rows and a server event in one D1 batch. A repeated client order ID cannot create a second fill; a concurrent account-version conflict fails closed.
+
+API keys are not part of the paper engine contract. No wallet, exchange credential or live order route is used.
 
 ## 5. UI behavior and trust boundary
 
-The Trading Desk displays one of these states:
-- **服务端备份已同步**: the browser snapshot was appended to D1.
-- **已从服务端恢复模拟账户**: the latest saved snapshot restored the browser's paper account.
-- **仅本地 / 云端同步失败**: D1 or the signing secret is not configured, or the service is unavailable. Local simulation remains available.
+The Trading Desk now treats the server as the only account authority:
 
-Important: this first D1 milestone is an **append-only audit and recovery journal**, not yet an authoritative execution ledger. The account snapshot originates from the browser's paper engine and is therefore untrusted for Kelly sizing, strategy promotion, or any live-trading decision. Agent run start/completion/failure and deterministic `risk.decision` events are written by the Pages Function itself (not the browser), including run ID, snapshot hash, prompt/model metadata, exact input snapshot, outputs, Kelly/Taker gate result and token usage. The Trading Desk renders these records in its audit timeline. The server does not accept live orders and does not claim to independently recompute paper fills. The next milestone is moving deterministic paper-order validation and fills into the trusted JEV/Worker backend and writing server-generated order/fill events.
+- **服务端权威账本已连接**: the D1-backed account was read successfully.
+- **服务端引擎不可用 · 已禁止下单**: D1, the signing secret or the API is unavailable. The UI does not fall back to browser-local execution.
+- **回放校验通过**: the server event snapshots and current materialized account match.
 
-## 6. Verification
+The browser no longer saves or restores the account from `localStorage`. Legacy browser snapshots in `paper_events` are not consulted by the server execution engine. Research-agent events remain a separate audit stream.
 
-After deployment, open the Trading Desk and confirm the status changes to **服务端备份已同步**. Place a small paper-only order, refresh the page, and verify the account snapshot is restored. Clear only the browser local storage (leave the HttpOnly session cookie intact), reload, and verify the latest server snapshot restores the account.
+Limit orders are currently advanced by the active Trading Desk polling `/api/paper/market/tick`; each request causes the server to fetch the book itself. If the browser is closed, pending limit orders are not actively polled in this P2 deployment. A scheduled Worker/Cron or Durable Object runner is a required follow-on before unattended continuous operation.
 
-Do not test by clearing all site cookies: that intentionally creates a new anonymous paper session.
+The server-generated account snapshots contain the complete recoverable state, while order-created, fill, reject, cancel and reset events preserve the execution trail. `GET /api/paper/replay` checks the state-hash chain and returns the last valid snapshot. This is a paper-only execution ledger, not a live trading engine.
+
+## 6. Preview verification checklist
+
+After configuring Preview D1 and the Preview signing secret:
+
+1. Open the Preview Trading Desk and confirm **服务端权威账本已连接**.
+2. Confirm the browser has no authoritative account key in local storage.
+3. Submit a small market paper order. Verify the server returns an order ID, a server book sequence and a server-generated fill.
+4. Re-submit the same client order ID with the same parameters. Confirm the existing order is returned and no second fill is created.
+5. Re-use the same client order ID with different parameters. Confirm the server rejects it with `IDEMPOTENCY_CONFLICT`.
+6. Place a non-marketable limit order. Confirm cash or inventory is reserved, partial fills are recorded, and a repeated book sequence cannot fill twice.
+7. Cancel an open order and confirm its reservation is released.
+8. Clear browser local storage and reload. Confirm the account is restored from D1.
+9. Click **校验并回放** and confirm the server reports a valid snapshot chain.
+10. Confirm the strategy gates remain closed for all strategies that have not passed independent OOS validation.
+
+Do not test by clearing all site cookies: that intentionally creates a new anonymous paper session. Do not use a Production database for Preview testing.
