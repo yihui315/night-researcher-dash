@@ -43,3 +43,15 @@
 
 
 .ai-provider-center{scroll-margin-top:82px}.ai-provider-center .panel-head h2{letter-spacing:.2px}.team-actions{align-items:center}.team-output{max-height:420px}.team-output .ai-message{font-size:11px}
+
+/* Dedicated AI provider center */
+.ai-settings-shell{max-width:1440px}
+.ai-settings-grid{display:grid;grid-template-columns:minmax(320px,.9fr) minmax(420px,1.1fr);gap:14px;align-items:start}
+.ai-settings-grid .ai-team-panel{grid-column:1/-1}
+.ai-settings-grid .ai-panel{min-width:0}
+.team-role-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:10px 0 14px}
+.team-role-grid>div{display:grid;gap:5px;padding:12px 9px;border:1px solid var(--line);border-radius:9px;background:rgba(5,10,18,.4)}
+.team-role-grid b{font-size:11px;color:var(--gold);letter-spacing:.6px}
+.team-role-grid span{font-size:10px;color:var(--muted)}
+.ai-nav-link{border-color:rgba(240,185,11,.38);color:#f5cf64;background:rgba(240,185,11,.07)}
+@media(max-width:900px){.ai-settings-grid{grid-template-columns:1fr}.ai-settings-grid .ai-team-panel{grid-column:auto}.team-role-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
