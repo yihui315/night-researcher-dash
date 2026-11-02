@@ -257,7 +257,7 @@ class Context:
 SIDE_COST = 0.0015  # 单边 0.15% (手续费0.1% + 滑点0.05%)
 
 
-def simulate(strategy, ctx, oos_split_idx, start_idx=0, end_idx=None):
+def simulate(strategy, ctx, oos_split_idx, start_idx=0, end_idx=None, compute_stress=True):
     """
     事件驱动回测：收盘产生信号，下一根 K 线开盘成交；止损使用当根 OHLC 检查。
     每次调用克隆策略实例，避免回测/敏感性分析之间发生状态污染。
@@ -359,7 +359,7 @@ def simulate(strategy, ctx, oos_split_idx, start_idx=0, end_idx=None):
     if not equity_curve:
         equity_curve = [1.0]
 
-    result = _summarize(trades, equity_curve, oos_split_idx, bars)
+    result = _summarize(trades, equity_curve, oos_split_idx, bars, compute_stress=compute_stress)
     result["execution_model"] = "next_bar_open_with_intrabar_ohlc_stops"
     return result
 
@@ -502,7 +502,7 @@ def grid_search(strategy_cls, ctx, param_grid, oos_split_idx):
     for combo in product(*param_grid.values()):
         params = dict(zip(keys, combo))
         strat = strategy_cls(**params)
-        s = simulate(strat, ctx, oos_split_idx)
+        s = simulate(strat, ctx, oos_split_idx, compute_stress=False)
         ins = s["insample"]
         oos = s["oos"]
         out.append({
@@ -649,7 +649,7 @@ def _slippage_sensitivity(trades, extra_bps=(0, 5, 10, 20, 50)):
     return out
 
 
-def _summarize(trades, equity, oos_split_idx, bars):
+def _summarize(trades, equity, oos_split_idx, bars, compute_stress=True):
     for t in trades:
         t["oos"] = t["exit_i"] >= oos_split_idx
 
@@ -724,8 +724,8 @@ def _summarize(trades, equity, oos_split_idx, bars):
         "excess": excess,
         "insample": stats(insample),
         "oos": stats(oos),
-        "monte_carlo": {"full": _monte_carlo(trades), "oos": _monte_carlo(oos)},
-        "slippage_sensitivity": _slippage_sensitivity(trades),
+        "monte_carlo": ({"full": _monte_carlo(trades), "oos": _monte_carlo(oos)} if compute_stress else None),
+        "slippage_sensitivity": (_slippage_sensitivity(trades) if compute_stress else None),
         "trades": trades,
     }
 
@@ -803,7 +803,7 @@ def _sensitivity(strategy, ctx):
     if not numeric:
         return {"suspect": False, "note": "无可调数字参数", "swings": {}}
 
-    base_sum = simulate(base_cls(**base_params), ctx, len(ctx.bars))
+    base_sum = simulate(base_cls(**base_params), ctx, len(ctx.bars), compute_stress=False)
     base_net = base_sum["insample"]["net"] if base_sum["insample"]["n"] else base_sum["n_trades"]
     swings = {}
     suspect = False
@@ -820,7 +820,7 @@ def _sensitivity(strategy, ctx):
                 variant = base_cls(**{**base_params, k: nv})
             except Exception:
                 continue
-            result = simulate(variant, ctx, len(ctx.bars))
+            result = simulate(variant, ctx, len(ctx.bars), compute_stress=False)
             vnet = result["insample"]["net"] if result["insample"]["n"] else 0.0
             swings[f"{k}:{v}->{nv}"] = round(vnet, 4)
             if base_net not in (0, None):
