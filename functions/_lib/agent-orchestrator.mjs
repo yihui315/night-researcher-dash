@@ -327,6 +327,14 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat, env
       note: "AI 只产生研究结论；KELLY 与 TAKER 为确定性程序；任何模拟订单都必须由用户点击并重新通过 paper-engine 风控"
     }
   };
+  await recordRunEvent("risk.decision", {
+    decision: outputs.TAKER && outputs.TAKER.status ? outputs.TAKER.status : "BLOCKED",
+    kellyStatus: outputs.KELLY && outputs.KELLY.status ? outputs.KELLY.status : "BLOCKED",
+    allocationPct: outputs.KELLY && Number.isFinite(Number(outputs.KELLY.allocationPct)) ? Number(outputs.KELLY.allocationPct) : 0,
+    autoSubmit: false,
+    liveTrading: false,
+    rationale: "研究结果不是订单授权；任何模拟订单仍需用户主动提交并重新通过确定性 paper-engine 风控"
+  });
   await recordRunEvent("agent.run.completed", runResult);
   return json({
     ok: true,
