@@ -19,7 +19,7 @@ const TRUSTED_EVENTS = new Set([
   "paper.server.order.cancelled"
 ]);
 
-function json(body, status = 200, headers = {}) {
+export function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
@@ -31,7 +31,7 @@ function json(body, status = 200, headers = {}) {
   });
 }
 
-function isSameOrigin(request) {
+export function isSameOrigin(request) {
   const origin = request.headers.get("Origin");
   return !origin || origin === new URL(request.url).origin;
 }
@@ -85,7 +85,7 @@ function cookieHeader(token, maxAge) {
   return COOKIE_NAME + "=" + encodeURIComponent(token) + "; Path=/api/; Max-Age=" + maxAge + "; HttpOnly; Secure; SameSite=Strict";
 }
 
-function requireConfig(env) {
+export function requireConfig(env) {
   if (!env || !env.PAPER_DB || typeof env.PAPER_DB.prepare !== "function") {
     return { error: json({ ok: false, code: "PAPER_LEDGER_NOT_CONFIGURED", error: "服务端模拟账本尚未配置 D1 数据库" }, 503) };
   }
@@ -95,7 +95,7 @@ function requireConfig(env) {
   return {};
 }
 
-async function readSession(request, env) {
+export async function readSession(request, env) {
   const token = cookieValue(request);
   const session = await verifyToken(token, env.PAPER_LEDGER_SECRET);
   if (!session) return { error: json({ ok: false, error: "模拟账本会话无效或已过期，请重新初始化" }, 401) };
