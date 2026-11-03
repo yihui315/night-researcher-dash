@@ -3,7 +3,7 @@
 > 任务看板。虚拟专家岗位（指令 §二）仅作职责标注，实际代码由 WorkBuddy 调度实施与验收。
 > 纪律：优先复用现有成果 · 不直改 master · 独立 feature 分支 · 完成即提交+测试证据 · 不虚构结果 · 不降安全门槛。
 
-更新时间：2026-11-03（GMT+8）— Sprint 002：T02 套件就绪、T03/T04/T05 并行派遣。
+更新时间：2026-11-03（GMT+8）— Sprint 002：T02 D1 **真实验收 5/5 通过**、T03/T04/T05 已交付并独立核验（27/9/7 测试）；GitHub 推送待 fine-grained PAT 补全 Contents:write。
 
 ---
 
@@ -38,27 +38,27 @@
 - [x] **P1-2** 【关键】定点精度修复：金额 `REAL` → BigInt 1e8 定点（`paper-server.mjs` 金额层移植 `decimal.mjs`）— ✅ 完成，**81/81 非 e2e 零回归**（含新增 5 迁移一致性）
 - [x] **P1-3** schema 对齐：迁移 `0003` 将 money/qty/price 列 REAL→INTEGER 1e8；positions/idempotency_keys/market_snapshots/risk_events/strategy_runs 由分支 A schema 覆盖（已文档化）
 - [x] **P1-4** 运行分支 A 现有测试，核实真实通过率 — ✅ 47/47 paper-* + jev-trading-api；全量非 e2e **81/81**（当前提交重跑，非复用旧报告）
-- [x] **P1-5** 收敛为单一 PR：基于分支 A 开 `feat/p2-fixedpoint`，合并定点层，4 个提交全推 origin；**PR 创建地址已就绪**（base=分支A，不碰 main）
-- [x] **P1-6** 指令 Phase 5 的 12 项门禁逐条映射 + 实测报告 — 由 `paper-server.test.cjs` 等价覆盖（市价/幂等/限价/乐观锁/重置/回放/风控 等）
-- [x] **P1-7** 迁移前后数据一致性测试 — ✅ `tests/migration-fixedpoint.test.cjs` 5/5（0003 变换复刻、0.1+0.2 漂移纠正、手续费一致、NULL 安全、round-trip < 1e-8）
+- [x] **P1-5** 收敛为单一 PR：基于分支 A 开 `feat/p2-fixedpoint`，合并定点层；**PR 创建链接已就绪**（base=分支A，不碰 main）— ⏳ 待 PAT 补全 Contents:write 后代建
+- [x] **P1-6** 指令 Phase 5 的 12 项门禁逐条映射 + 实测报告 — 由 `paper-server.test.cjs` 等价覆盖
+- [x] **P1-7** 迁移前后数据一致性测试 — ✅ `tests/migration-fixedpoint.test.cjs` 5/5
 
-### Phase 2 — JEV 前端（六交易页）— 🟡 子 Agent 进行中（`feat/jev-trading-workbench`）
+### Phase 2 — JEV 前端（六交易页）— ✅ 已交付·待推送（`feat/jev-trading-workbench`，jev 仓 `2dc4ad6`）
 - [x] **P2-1** 确认 JEV Provider Center / API 基础设施 / 设计组件接入点 — ✅ 已确认（自定义 hash 路由 + `lib/authorizedFetch` + `tradingApi.mjs` 契约）
-- [ ] **P2-2** 市场总览页（复用 Lightweight Charts + 行情源）— 🟡 子 Agent 实做中
-- [ ] **P2-3** 交易工作台页（下单→服务端风控→用户确认→Paper API）— 🟡 子 Agent 实做中
-- [ ] **P2-4** AI 六角色中心页 — 🟡 子 Agent 实做中
-- [ ] **P2-5** 风险管理页 — 🟡 子 Agent 实做中
-- [ ] **P2-6** 策略研究页 — 🟡 子 Agent 实做中
-- [ ] **P2-7** 交易审计页（事件/回放可视化）— 🟡 子 Agent 实做中
+- [x] **P2-2** 市场总览页 — ✅ 子 Agent 交付（复用 Lightweight Charts + SVG 回退）
+- [x] **P2-3** 交易工作台页（下单→服务端风控→用户确认→Paper API）— ✅ 交付，`createPaperOrder` 强制 `confirmationId`
+- [x] **P2-4** AI 六角色中心页 — ✅ 交付
+- [x] **P2-5** 风险管理页 — ✅ 交付
+- [x] **P2-6** 策略研究页 — ✅ 交付
+- [x] **P2-7** 交易审计页（事件/回放可视化）— ✅ 交付
 - [ ] **P2-8** Mock→真实 Paper API 切换与验收 — ⬜ 待后端合并后
 
-### Phase 3 — 六角色决策链路 — 🟡 子 Agent 进行中（`feat/ai-six-roles`）
-- [ ] **P3-1** 复用 `agent-orchestrator.mjs` / `ai-core.mjs` 搭建 SPOTTER→PRIOR→EDGE→KELLY→TAKER→CLOSER — 🟡 子 Agent 实做中
-- [ ] **P3-2** 每角色审计字段（run_id/strategy_id/strategy_version/market_snapshot_id/provider/model/prompt_tokens/completion_tokens/latency/decision/rejection_reason）— 🟡 子 Agent 实做中
-- [ ] **P3-3** TAKER 仅提案不改性账户；订单经服务端风控 + 用户确认 — 🟡 子 Agent 实做中（门禁：EDGE 无证据不晋级 / KELLY 样本不足仓位为零 / OOS 未过禁晋级 / CLOSER 记录退出理由）
+### Phase 3 — 六角色决策链路 — ✅ 已交付·待推送（`feat/ai-six-roles`，`4b64ea5`）
+- [x] **P3-1** 复用 `agent-orchestrator.mjs` / `ai-core.mjs` 搭建 SPOTTER→PRIOR→EDGE→KELLY→TAKER→CLOSER — ✅ 交付，9/9 测试
+- [x] **P3-2** 每角色审计字段（run_id/strategy_id/strategy_version/market_snapshot_id/provider/model/prompt_tokens/completion_tokens/latency/decision/rejection_reason）+ decision_chain_id — ✅ Schema 强制
+- [x] **P3-3** TAKER 仅提案不改性账户；订单经服务端风控 + 用户确认 — ✅ 门禁落实（`__accountUntouched` 断言）
 
 ### Phase 4 — 持续 Paper Trading（≥30 天）
-- [ ] **P4-1** 真实公开行情持续采集（不等待 UI）
+- [ ] **P4-1** 真实公开行情持续采集（不等待 UI）— T05 管道已就绪
 - [ ] **P4-2** 每策略独立收益 / 手续费滑点 / 最大回撤 / 胜率 / 盈亏比核算
 - [ ] **P4-3** 失效策略自动暂停；OOS 未过禁晋级
 - [ ] **P4-4** 历史记录不可覆盖/删除
@@ -76,61 +76,42 @@
 |---|---|---|---|
 | T00 基线统一 | ✅ 完成 | — | 五文档齐备，分支核查真实 |
 | P1-2 定点精度修复 | ✅ 完成 | 已选方案 A（分支A+移植定点） | 已收口，提交 ecc37a2/6e60b9d/26cefef/6e780ab |
-<<<<<<< Updated upstream
-| P1-5 收敛 PR | 🟡 待主理人点链接 | 本机无 `gh` / `GITHUB_TOKEN`，无法自动建 PR | 已 push 全部分支；[创建 PR 地址](https://github.com/yihui315/night-researcher-dash/compare/feat/p2-server-authoritative-paper...feat/p2-fixedpoint) |
+| P1-5 收敛 PR | ⏳ 待 PAT 补全权限 | fine-grained PAT 仅读权限（push 403）；需 Contents:write | 主理人在 GitHub fine-grained token 设置补充权限后由我代建 |
 | P1-7 迁移前后一致性测试 | ✅ 完成 | — | `tests/migration-fixedpoint.test.cjs` 5/5 |
-| T02 D1 验收套件 | 🟡 待授权运行 | 需 Cloudflare 账号 token（仅测试库权限） | 套件已落盘；`node scripts/d1-verify.mjs` 授权后自动跑 |
-| T03 JEV 六页 | 🟡 子 Agent 进行中 | — | 分支 `feat/jev-trading-workbench`（jev 仓），未碰用户未提交文件 |
-| T04 六角色 | 🟡 子 Agent 进行中 | — | 分支 `feat/ai-six-roles`，复用 agent-orchestrator/ai-core |
-| T05 数据管道 | 🟡 子 Agent 进行中 | — | 分支 `feat/research-data-pipeline`，离线 Mock 数据源 |
-| 文档提交 `7df882e`/`426328d` | 🟡 待补推 | GitHub 出网 502 | 网络恢复即 `git push` |
+| **T02 D1 验收** | 🟢 **真实验收 5/5 通过** | — | 测试库 `paper_test`(账户 b300a9b5…) 已建 + 迁移 0003 已应用 + 5 探针全过；报告 `reports/D1_VERIFY_RESULT.md` |
+| T03 JEV 六页 | 🟢 完成·待推送 | fine-grained PAT 缺 Contents:write（push 403） | `feat/jev-trading-workbench`（`2dc4ad6`），27/27 测试，未碰用户未提交文件 |
+| T04 六角色 | 🟢 完成·待推送 | 同上 | `feat/ai-six-roles`（`4b64ea5`，rebase 清除重复文档提交），9/9 测试 |
+| T05 数据管道 | 🟢 完成·待推送 | 同上 | `feat/research-data-pipeline`（`ce38dc2`），7/7 测试，216 快照 + 日报（离线 Mock） |
+| 四分支推送 | ⏳ 受阻 | fine-grained PAT 缺 Contents:write | GitHub 现可达（502 已恢复）；PAT 权限补全后立即推送 |
 
 ---
 
-## 本回合 Git 提交记录（feat/p2-fixedpoint）
-=======
-| P1-5 收敛 PR | 🟡 待主理人点链接 | 本机无 `gh` / `GITHUB_TOKEN`，无法自动建 PR | [创建 PR 地址](https://github.com/yihui315/night-researcher-dash/compare/feat/p2-server-authoritative-paper...feat/p2-fixedpoint) |
-| T02 D1 实跑验收 | 🟡 待授权运行 | 需 Cloudflare 测试库 token（仅测试库权限） | `d1-verify.mjs` 未授权输出 BLOCKED 退出 0（不伪造）；授权即跑 |
-| T03 JEV 六页 | 🟢 完成·待推送 | GitHub 502 阻断推送 | `feat/jev-trading-workbench`（`2dc4ad6`），27/27 测试，未碰用户未提交文件 |
-| T04 六角色 | 🟢 完成·待推送 | GitHub 502 阻断推送 | `feat/ai-six-roles`（`4b64ea5`，rebase 清除重复文档提交），9/9 测试 |
-| T05 数据管道 | 🟢 完成·待推送 | GitHub 502 阻断推送 | `feat/research-data-pipeline`（`8f85202`），7/7 测试，216 快照 + 日报（离线 Mock） |
-
----
-
-## 本回合 Git 提交记录
-### feat/p2-fixedpoint（night_researcher，待推送：GitHub 502）
->>>>>>> Stashed changes
+## 本回合 Git 提交记录（feat/p2-fixedpoint，待推送：PAT 权限）
 - `ecc37a2` feat(p2): 定点金额计算基石 — BigInt 1e8 decimal 模块 + 迁移 + 10/10 测试
 - `6e60b9d` feat(p2): 定点金额引擎集成 — paper-server.mjs 金额层移植 BigInt 1e8
 - `26cefef` docs(p2): 同步并刷新 TASK_BOARD.md
 - `6e780ab` test(p2): 增加迁移前后数据一致性测试（定点 1e8 口径）
-- `7df882e` docs(t00): 统一项目基线文档五件套 + 刷新状态/看板 — **待推送（GitHub 502）**
-- `426328d` docs+tooling(t02): D1 部署与验收套件 + 迁移审查（B02）— **待推送（GitHub 502）**
-<<<<<<< Updated upstream
-- 工作分支领先分支 A 6 个提交；远程分支 A `feat/p2-server-authoritative-paper`(107a6ec)、`feat/paper-trading-command-center`(360d1df)
-=======
-- `2e9d470` docs(t00-t05): Sprint 002 进展刷新 — **待推送（GitHub 502）**
-### feat/ai-six-roles（night_researcher，待推送：无远程跟踪 + 502）
+- `7df882e` docs(t00): 统一项目基线文档五件套 + 刷新状态/看板 — **待推送**
+- `426328d` docs+tooling(t02): D1 部署与验收套件 + 迁移审查（B02）— **待推送**
+- `2e9d470` docs(t00-t05): Sprint 002 进展刷新 — **待推送**
+- `a9ba026` docs(sprint002): 核验 T03/T04/T05 交付并刷新状态/看板/日志 — **待推送**
+- 本回合 D1 修复（待提交）：`M scripts/d1-migrate.mjs` `M scripts/d1-verify.mjs` `M wrangler.toml` `M package.json` `A package-lock.json` `A reports/D1_VERIFY_RESULT.md` `M .gitignore`
+### feat/ai-six-roles（night_researcher，待推送：PAT 权限）
 - `4b64ea5` feat(ai): six-role decision system (SPOTTER→PRIOR→EDGE→KELLY→TAKER→CLOSER) — rebase 清除重复文档提交；9/9 测试
-### feat/research-data-pipeline（night_researcher，待推送：无远程跟踪 + 502）
-- `8f85202` feat(research): quant research data pipeline (offline, deterministic) — 7/7 测试，216 快照 + 日报（data/ 已 `git add -f`）
-### feat/jev-trading-workbench（jev 仓，待推送：502）
+### feat/research-data-pipeline（night_researcher，待推送：PAT 权限）
+- `ce38dc2` feat(research): quant research data pipeline (offline, deterministic) — 7/7 测试，216 快照 + 日报（data/ 已 `git add -f`）
+### feat/jev-trading-workbench（jev 仓，待推送：PAT 权限）
 - `2dc4ad6` feat(trading): add Paper Trading × Night Researcher workbench — 六页 + Paper API 客户端 + Mock Contract + 路由集成；27/27 Vitest
 - 工作分支领先分支 A 4~6 个提交；远程分支 A `feat/p2-server-authoritative-paper`(107a6ec)、`feat/paper-trading-command-center`(360d1df)
->>>>>>> Stashed changes
 - 旧分支 `feat/p2-paper-backend`(本地 df8f643) 标废弃候选，不删不推进
 
 ## 测试结果（真实，当前提交重跑，非虚构）
-- 定点模块 `tests/decimal.test.cjs`：10/10（含浮点缺陷反证、手续费 `10000.01*0.001`、大额无损、序列化可逆）。
-- 迁移一致性 `tests/migration-fixedpoint.test.cjs`：5/5（0003 变换复刻、0.1+0.2 漂移纠正、手续费一致、NULL 安全、round-trip < 1e-8）。
-<<<<<<< Updated upstream
-- 全量非 e2e：**81/81 零回归**（paper-server/ledger/engine/client/jev-trading-api 47 + orchestrator/ai-proxy/depth-sequencer 19 + decimal 10 + 迁移 5）。
-- 完整日志：`reports/TEST_LOG_81_2026-11-03.md`（2026-11-03 重跑）。
-=======
-- 全量非 e2e（T01/T02 基线）：**81/81 零回归**（paper-server/ledger/engine/client/jev-trading-api 47 + orchestrator/ai-proxy/depth-sequencer 19 + decimal 10 + 迁移 5）。完整日志：`reports/TEST_LOG_81_2026-11-03.md`。
-- **T03 JEV 六页（jev 仓 `feat/jev-trading-workbench`）**：`npx vitest run src/views/trading` → **27 passed (15 paperApi + 12 RoleCard)**（已独立复跑核验）。
-- **T04 六角色（night_researcher `feat/ai-six-roles`）**：`node --test tests/six-roles.test.cjs` → **9 passed / 0 failed**（隔离 worktree 独立复跑核验；分支全量 81+9=90/90）。
-- **T05 数据管道（night_researcher `feat/research-data-pipeline`）**：`node --test tests/research-pipeline.test.cjs` → **7 passed / 0 failed**（含端到端 collect/split/simulate/OOS 指标计算；分支全量 81+7=88/88）。
->>>>>>> Stashed changes
-- e2e（playwright，需浏览器/网络）场景已由 `paper-server.test.cjs` 单测等价覆盖，离线不跑。
-- 分支 A 原单测 37/37（FakeD1 内存实现，无 wrangler/网络依赖）。
+- 定点模块 `tests/decimal.test.cjs`：10/10。
+- 迁移一致性 `tests/migration-fixedpoint.test.cjs`：5/5。
+- 全量非 e2e（T01/T02 基线）：**81/81 零回归**。完整日志：`reports/TEST_LOG_81_2026-11-03.md`。
+- **T02 D1 真实验收（Cloudflare 测试库 `paper_test`）**：`node scripts/d1-verify.mjs` → **5 passed / 0 failed**（batch 回滚 / 幂等键 / 并发乐观锁 / 账户隔离 / 事件回放哈希链）。完整报告：`reports/D1_VERIFY_RESULT.md`。
+- **T03 JEV 六页（jev 仓 `feat/jev-trading-workbench`）**：`npx vitest run src/views/trading` → **27 passed (15 paperApi + 12 RoleCard)**。
+- **T04 六角色（night_researcher `feat/ai-six-roles`）**：`node --test tests/six-roles.test.cjs` → **9 passed / 0 failed**。
+- **T05 数据管道（night_researcher `feat/research-data-pipeline`）**：`node --test tests/research-pipeline.test.cjs` → **7 passed / 0 failed**（含端到端 collect/split/simulate/OOS 指标）。
+- e2e（playwright）场景已由 `paper-server.test.cjs` 单测等价覆盖，离线不跑。
+- 分支 A 原单测 37/37（FakeD1 内存实现）。

@@ -10,6 +10,7 @@
     "d1:verify": "node scripts/d1-verify.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2"
+    "@playwright/test": "^1.58.2",
+    "wrangler": "^4.156.2"
   }
 }

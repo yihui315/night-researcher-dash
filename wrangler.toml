@@ -9,4 +9,4 @@ compatibility_date = "2024-11-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "paper_test"
-database_id = "REPLACE_WITH_TEST_DATABASE_ID"
+database_id = "4fadf62a-965e-4ab7-bb89-b1c9cdaf9d0b"

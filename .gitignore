@@ -1,6 +1,9 @@
 # 本地缓存（自动重新下载，无需入库）—— 仅忽略根目录 data/，绝不误伤 dashboard/data/
 /data/
 
+# Node 依赖（本地安装 wrangler 等，自动重装，无需入库）
+node_modules/
+
 # Python
 __pycache__/
 *.pyc

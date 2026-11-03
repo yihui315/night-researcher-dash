@@ -86,13 +86,23 @@
 - 获 Cloudflare 授权后运行 `node scripts/d1-verify.mjs` 真实 D1 验收并填 `reports/D1_VERIFY_RESULT.md`。
 - 合入 T03/T04/T05 后推进 Phase 4 持续运行 + Phase 5 集成交付。
 
-### 7. 整体达成度与计划偏差
-- T00：✅ 100%。T01：🟢 90%（代码/测试全完，PR 待主理人创建）。T02：🟡 ~50%（套件+审查就绪，真实运行待 Cloudflare 授权）。T03：🟢 100%（交付+独立核验 27/27）。T04：🟢 100%（交付+独立核验 9/9）。T05：🟢 100%（交付+独立核验 7/7，216 快照+日报）。
-- 计划偏差：无重大偏差；T02 真实运行受 Cloudflare 授权阻塞（已在无授权时完成全部本地等价工作与脚本准备）；所有推送受 GitHub 502 阻断，本地均已提交，待网络恢复补推，符合"不依赖单一授权/网络而停滞"的指令。
+### 7. 整体达成度与计划偏差（更新）
+- T00：✅ 100%。T01：🟢 90%（代码/测试全完，PR 待主理人创建 / 或 PAT 权限补全后代建）。T02：🟢 100%（D1 真实验收 **5/5 通过**，`paper_test` + 迁移 0003 已应用）。T03：🟢 100%（交付+独立核验 27/27）。T04：🟢 100%（交付+独立核验 9/9）。T05：🟢 100%（交付+独立核验 7/7，216 快照+日报）。
+- 计划偏差：原 T02 真实运行受 Cloudflare 授权阻塞——**现已解决**（token 已到位，实测 5/5）。新阻塞：fine-grained GitHub PAT 仅具读权限（push 403），需主理人补 Contents:write。
+
+### 8. D1 真实验收完成（Cloudflare token 已到位，本回合）
+- **T02 D1 真实验收 5/5**：用主理人提供的 Cloudflare API Token（`cfat_…`）在账户 `b300a9b5…` 建测试库 `paper_test`、应用迁移 0003、跑 5 项探针——**全部通过**（batch 回滚 / 幂等键 / 并发乐观锁 / 账户隔离 / 事件回放哈希链），结果写入 `reports/D1_VERIFY_RESULT.md`。
+- **脚本实现修正（重要）**：`scripts/d1-migrate.mjs`/`d1-verify.mjs` 原为 `npx wrangler` 调用，在 Windows 下有三处实现缺陷——① `spawnSync("npx")` 无法解析 `npx.cmd` 致调用静默失败；② `wrangler` 代理警告文本污染 JSON 解析；③ `changes` 字段实际位于 `meta.changes` 被误读为顶层。已全部修正（改用本地 `node_modules/wrangler/bin/wrangler.js`、容错解析 JSON 前缀、读 `meta.changes`），现 5/5 真实通过。
+- **GitHub PAT 权限发现**：主理人提供的 fine-grained PAT 实测仅具**读权限**（API GET 200、git push 403 "Permission denied to yihui315"）。需在 GitHub → Settings → Developer settings → fine-grained tokens 给该 token 补充 **Contents: Read and write**（及 **Pull requests: write** 以便代建 PR）。GitHub 出网 502 已恢复，但推送仍受 PAT 权限阻断。
+
+### 9. 本回合修改文件与提交 SHA（待推送）
+- night_researcher `feat/p2-fixedpoint`（含 `a9ba026` 文档刷新 + 本回合 D1 修复）：
+  - `M scripts/d1-migrate.mjs`、`M scripts/d1-verify.mjs`、`M wrangler.toml`（database_id 填真实测试库 id `4fadf62a-…`）、`M package.json`（新增 wrangler devDep）、`A package-lock.json`、`A reports/D1_VERIFY_RESULT.md`、`M .gitignore`（忽略 node_modules）。
+- 待推送分支汇总：night_researcher `feat/p2-fixedpoint`(`a9ba026`+D1 修复) / `feat/ai-six-roles`(`4b64ea5`) / `feat/research-data-pipeline`(`ce38dc2`)；jev `feat/jev-trading-workbench`(`2dc4ad6`)。
 
 ---
 
-## 真实 PR 创建地址（T01，待主理人点开）
+## 真实 PR 创建地址（T01，待主理人点开 / 或 PAT 权限补全后代建）
 ```
 https://github.com/yihui315/night-researcher-dash/compare/feat/p2-server-authoritative-paper...feat/p2-fixedpoint
 ```
