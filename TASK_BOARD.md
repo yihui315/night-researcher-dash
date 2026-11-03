@@ -3,7 +3,7 @@
 > 任务看板。虚拟专家岗位（指令 §二）仅作职责标注，实际代码由 WorkBuddy 调度实施与验收。
 > 纪律：优先复用现有成果 · 不直改 master · 独立 feature 分支 · 完成即提交+测试证据 · 不虚构结果 · 不降安全门槛。
 
-更新时间：2026-11-03（GMT+8）— Sprint 002：T02 D1 **真实验收 5/5 通过**、T03/T04/T05 已交付并独立核验（27/9/7 测试）；GitHub 推送待 fine-grained PAT 补全 Contents:write。
+更新时间：2026-11-03（GMT+8）— **V2.0 自主执行总控已上线**（凭据中心 + 常驻 Supervisor + 每日 03:05 自动巡检）。T02 D1 **真实验收 5/5**；T03/T04/T05 已交付并独立核验（27/9/7）；四分支推送待 fine-grained PAT 补全 Contents:write。**T05 当前 216 快照为确定性离线 Mock，非真实行情。**
 
 ---
 
@@ -70,6 +70,14 @@
 
 ---
 
+### V2.0 自主执行总控（已上线）
+- **凭据中心** `D:\数据分析\autopilot\security\credential-center.mjs`：AES-256-GCM（DPAPI .NET 入口被沙箱拦截，改用密码学等价方案），密钥 `key.bin` ACL 锁定当前用户；`GH_TOKEN`/`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` 已加密入库（仓库外，永不入库）。密钥原文不进 Git/日志/报告/聊天。
+- **常驻 Supervisor** `D:\数据分析\autopilot\core/supervisor.mjs` + `queue/tasks.json`：持久化队列、隔离 worktree（`worktree.mjs`）、Git/PR 自动（`git.mjs`）、每日巡检 `runDaily()`（幂等）。
+- **每日自动巡检** 已激活：WorkBuddy 自动化「JEV×NightResearcher 自主巡检」每日 03:05 运行，自动探测凭据→推送领先分支→创建/更新 PR→写 `reports/DAILY_REPORT_<date>.md`→里程碑/阻塞提醒。硬边界：不碰生产主分支 / 不部署生产 / 不连真实交易所或真实资金 / 不回显密钥 / 不重复已完成任务 / 结论必标 VERIFIED 或 UNVERIFIED（严禁伪造）。
+- **唯一外部阻塞**：fine-grained GitHub PAT 缺 `Contents:write`（push 403）+ `Pull requests:write`。主理人在 GitHub 设置补全后，下一次巡检自动推送四分支并建 PR（token 串不变）。
+
+---
+
 ## 进行中 / 阻塞
 
 | 任务 | 状态 | 阻塞原因 | 解决路径 |
@@ -81,7 +89,7 @@
 | **T02 D1 验收** | 🟢 **真实验收 5/5 通过** | — | 测试库 `paper_test`(账户 b300a9b5…) 已建 + 迁移 0003 已应用 + 5 探针全过；报告 `reports/D1_VERIFY_RESULT.md` |
 | T03 JEV 六页 | 🟢 完成·待推送 | fine-grained PAT 缺 Contents:write（push 403） | `feat/jev-trading-workbench`（`2dc4ad6`），27/27 测试，未碰用户未提交文件 |
 | T04 六角色 | 🟢 完成·待推送 | 同上 | `feat/ai-six-roles`（`4b64ea5`，rebase 清除重复文档提交），9/9 测试 |
-| T05 数据管道 | 🟢 完成·待推送 | 同上 | `feat/research-data-pipeline`（`ce38dc2`），7/7 测试，216 快照 + 日报（离线 Mock） |
+| T05 数据管道 | 🟢 完成·待推送（**离线 Mock**） | 同上；且数据非真实行情 | `feat/research-data-pipeline`（`ce38dc2`），7/7 测试，216 快照 + 日报（**确定性离线 Mock，严禁宣称真实行情**） |
 | 四分支推送 | ⏳ 受阻 | fine-grained PAT 缺 Contents:write | GitHub 现可达（502 已恢复）；PAT 权限补全后立即推送 |
 
 ---

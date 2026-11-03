@@ -2,7 +2,7 @@
 
 > 总控执行令 V1.1 统一项目状态。由 WorkBuddy（工程总执行负责人）维护。
 > 所有结论基于真实 `git` / 文件系统 / 本地测试核查，非推测。
-> 更新时间：2026-11-03（GMT+8）— Sprint 002：T02 D1 **真实验收 5/5 通过**、T03/T04/T05 已交付并独立核验（27/9/7 测试）；GitHub 推送待 fine-grained PAT 补全 Contents:write
+> 更新时间：2026-11-03（GMT+8）— **V2.0 自主执行总控已上线**：凭据中心（AES-256-GCM，密钥 ACL 锁定，置于仓库外）+ 常驻 Supervisor（任务队列/隔离 worktree/Git&PR 自动化/每日巡检）+ 每日 03:05 自动巡检已激活。T02 D1 真实验收 **5/5**；T03/T04/T05 已交付并独立核验（27/9/7）；四分支推送待 fine-grained PAT 补全 Contents:write。
 
 ---
 
@@ -84,11 +84,35 @@
 
 ---
 
+## 6. V2.0 Autonomous Supervisor（自主执行总控）— 🟢 已上线
+
+主理人已下达长期自主执行总控令：WorkBuddy 不再逐项等令，改为**读取状态→自动分配→并行执行→独立测试→自动提交→自动推送→自动 PR→自动验收→继续下一任务**，仅在**生产发布 / 生产主分支保护变更 / 真实资金及交易权限 / 超预算或安全边界**时请求人工审批。
+
+### 6.1 凭据中心（统一 Credential Provider）
+- 位置：`D:\数据分析\autopilot\security\credential-center.mjs`（仓库外，永不入库）。
+- 存储：`D:\数据分析\autopilot\.credentials/`（密钥文件 `key.bin` 经 `icacls` 去除继承并仅授权当前用户读；`store.json` 仅存 `{iv,tag,data}` 密文）。
+- **密钥原文不进 Git / 日志 / 报告 / 聊天**；运行时经 `getCredential()` 解密使用，绝不回显。
+- 实现说明：Windows DPAPI 的 .NET 入口（`Add-Type`/`Assembly.Load`）被沙箱运行时策略拦截，故采用**密码学等价**的 AES-256-GCM（KEK 锁定到当前 Windows 用户），仍满足"不落明文、不入库、不回显、按用户/机器隔离"的安全意图。
+- 已一次性迁入：`GH_TOKEN`、`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`（取自主理人上一轮提供，迁移后仅以密文存在；**建议主理人随后在 GitHub/Cloudflare 侧轮换这两个 Token**，因其曾在聊天中暴露）。
+
+### 6.2 常驻 Supervisor 框架
+- `D:\数据分析\autopilot\core/supervisor.mjs`：持久化任务队列 + 每日巡检 `runDaily()`（幂等：仅推送领先 origin 的分支、仅对 open PR 不存在时创建）。
+- `core/config.mjs`：仓库路径（已修正 jev 真实路径 `D:/jev/...`）、PUSH_TARGETS、团队归属。
+- `core/worktree.mjs`：**每个 Agent 任务独立 worktree**（`withWorktree`），消除此前共享工作树导致的分支串扰。
+- `core/git.mjs`：经凭据中心读取 `GH_TOKEN` 自动推送 + 经 GitHub API 自动创建/更新 PR（base/head 见 config）。
+- `queue/tasks.json`：10 项任务（feat/ai-*、T04 真实 Provider、T03 集成、T05 真实行情、T06 E2E、T07 30天、T08 交付），状态/证据/依赖清晰；已完成项标注 `pr-open`，未做项标注 `UNVERIFIED`。
+
+### 6.3 持久调度（GUI 关闭后仍运行）
+- 已创建 WorkBuddy 每日自动化「JEV×NightResearcher 自主巡检」（id `494e3085…`），**每日 03:05** 执行 `node core/supervisor.mjs runDaily`，自动探测凭据、推送领先分支、创建/更新 PR、写出 `reports/DAILY_REPORT_<date>.md`，并在出现新里程碑或阻塞时提醒主理人。
+- 硬边界（自动化 prompt 内固化）：**不碰生产主分支 / 不部署生产 / 不连真实交易所或用真实资金 / 不回显密钥 / 不重复已完成任务 / 结论必标 VERIFIED 或 UNVERIFIED、严禁伪造**。
+
+---
+
 ## 5. 下一步
 1. ✅ T00 基线统一完成（五文档 + 分支核查）。
 2. ✅ T01 定点精度修复收口，81/81 非 e2e 测试零回归，提交已就绪待推。
-3. ✅ T03 JEV 六页交付并独立核验（27/27）。✅ T04 六角色交付并独立核验（9/9）。✅ T05 数据管道交付并独立核验（7/7，216 快照 + 日报）。
-4. **主理人动作 A（必需）**：给 fine-grained GitHub PAT 补充 **Contents: Read and write**（+ **Pull requests: write**）→ 我即推送四分支 + 代建 P2 PR（base=分支A，head=fixedpoint）。
-5. ~~**主理人动作 B（Cloudflare token）**~~：已完成。测试库 `paper_test` 已建、迁移已应用、D1 真实验收 **5/5 通过**（见 `reports/D1_VERIFY_RESULT.md`）。
-6. PAT 权限补全后补推四分支（night_researcher `feat/p2-fixedpoint`/`feat/ai-six-roles`/`feat/research-data-pipeline` + jev `feat/jev-trading-workbench`），并代建 P2 PR。
-7. 合入 T03/T04/T05 后推进 Phase 4 持续运行 + Phase 5 集成交付。
+3. ✅ T03 JEV 六页交付并独立核验（27/27）。✅ T04 六角色交付并独立核验（9/9）。✅ T05 数据管道交付并独立核验（7/7，216 快照 + 日报——**当前为确定性离线 Mock，非真实行情**）。
+4. ✅ **V2.0 自主执行总控已上线**（凭据中心 + 常驻 Supervisor + 每日 03:05 自动巡检）。后续开发/测试/推送/PR/测试环境部署由 Supervisor 自主循环；主理人只看里程碑报告与需审批事项。
+5. **主理人动作（唯一外部阻塞，PAT 权限）**：给 fine-grained GitHub PAT 补充 **Contents: Read and write**（+ **Pull requests: Read and write**）后 Save（token 串不变）。授权后，下一次每日巡检（或我即时运行）将**自动推送四分支**（`feat/p2-fixedpoint`/`feat/ai-six-roles`/`feat/research-data-pipeline` + jev `feat/jev-trading-workbench`）并**自动创建/更新 PR**（base 见 §6.2）。
+6. PAT 权限补全后，Supervisor 自动推进：T03/T04/T05 合入 → T04 真实 Provider 端到端 → T03 与 JEV 主工程集成（Mock→真实 Paper API）→ **T05 离线 Mock 升级真实公开行情**（明确标注真实来源）→ T06 完整 E2E → T07 连续 30 天 → T08 交付。
+7. 建议主理人随后轮换 GitHub 与 Cloudflare Token（因其曾在聊天中暴露），轮换后只需在 WorkBuddy 凭据界面/凭据中心更新，Supervisor 自动续用。

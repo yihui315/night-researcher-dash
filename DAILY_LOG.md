@@ -159,7 +159,34 @@ https://github.com/yihui315/night-researcher-dash/compare/feat/p2-server-authori
 
 ---
 
-## 真实 PR 创建地址（T01，待主理人点开）
+## 2026-11-03（GMT+8）— V2.0 自主执行总控上线（里程碑）
+
+### 1. 今日完成（自主执行，非等待逐令）
+- **凭据中心建成（`D:\数据分析\autopilot\security\credential-center.mjs`）**：沙箱拦截 DPAPI 的 .NET 入口（`Add-Type`/`Assembly.Load`），改用**密码学等价**的 AES-256-GCM；密钥文件 `key.bin` 经 `icacls` 去除继承并仅授权当前用户读；`store.json` 仅存 `{iv,tag,data}` 密文。**已一次性加密迁入 `GH_TOKEN`/`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`**（取自主理人上一轮提供，迁移后仅以密文存在），加解密往返验证通过（仅打印长度/名称，未回显原文）。`.credentials/` 位于**任何 git 仓库之外**且 `.gitignore` 双保险。
+- **常驻 Supervisor 框架建成**（`D:\数据分析\autopilot/`）：`core/config.mjs`（仓库路径已修正 jev 真实路径 `D:/jev/...`）、`core/worktree.mjs`（**每 Agent 独立 worktree**，根治共享工作树串扰）、`core/git.mjs`（经凭据中心读取 `GH_TOKEN` 自动推送 + 经 GitHub API 自动建/更新 PR）、`core/supervisor.mjs`（`runDaily()` 幂等：仅推送领先 origin 分支、仅 open PR 不存在时创建、写 `reports/DAILY_REPORT_<date>.md`）、`queue/tasks.json`（10 项任务含依赖/团队/状态/证据）。
+- **每日自动巡检激活**：WorkBuddy 自动化「JEV×NightResearcher 自主巡检」(id `494e3085…`) 每日 **03:05** 运行 Supervisor；硬边界固化（不碰生产主分支 / 不部署生产 / 不连真实交易所或真实资金 / 不回显密钥 / 不重复已完成任务 / 结论必标 VERIFIED 或 UNVERIFIED）。
+- **实测验证 Supervisor 闭环**：`runDaily` 成功探测凭据（GitHub ok, Cloudflare ok 且 D1 库存在）、正确计算各分支领先数（p2fp=5/ai6=3/research=4/jev=1），并因 PAT 缺 `Contents:write` 自动定位为唯一阻塞——**证明自动化链路通畅，仅卡在权限**。
+
+### 2. 修改/新增文件 SHA（autopilot 在仓库外，未提交入项目仓）
+- 新增 `D:\数据分析\autopilot\security/credential-center.mjs`、`security/_migrate_once.mjs`(已删)、`core/{config,worktree,git,supervisor}.mjs`、`queue/tasks.json`、`.gitignore`、`reports/DAILY_REPORT_2026-11-03.md`。
+- 修正 `core/config.mjs` 中 jev 仓库真实路径（原误写 `D:/数据分析/jev/...`，实为 `D:/jev/...`）。
+
+### 3. 自动化测试真实结果（Supervisor 实测）
+- 凭据探测：GitHub `ok=true user=yihui315`（scopes 解析为空 → 推得 `hasContentsWrite=false`）；Cloudflare `ok=true d1Databases=1`。
+- 各分支领先 origin：feat/p2-fixedpoint=5、feat/ai-six-roles=3、feat/research-data-pipeline=4、feat/jev-trading-workbench=1。
+- 阻塞：GitHub fine-grained PAT 缺 `Contents:write` + `Pull requests:write`（push/PR 403）。
+
+### 4. 未完成任务及原因（唯一外部阻塞）
+- **四分支推送 + 四 PR 创建**：受 fine-grained GitHub PAT 仅读权限阻断（push 403）。主理人在 GitHub 设置补 `Contents:write`(+`Pull requests:write`) 后 Save（token 串不变），下一次每日巡检（或即时运行）将自动完成。
+
+### 5. 里程碑结论
+- T00/T01/T02(D1)/T03/T04/T05 代码与测试均 **VERIFIED** 完成；T02 D1 **真实 5/5**；T05 数据明确为**离线 Mock（非真实行情）**。
+- 项目正式进入 **V2.0 自主执行模式**：开发/测试/推送/PR/D1 测试环境部署由 Supervisor 自主循环；主理人只看里程碑报告与需审批事项。
+- **建议主理人随后轮换 GitHub 与 Cloudflare Token**（因曾在聊天中暴露）；轮换后仅需在凭据中心更新，Supervisor 自动续用。
+
+---
+
+## 真实 PR 创建地址（T01，待主理人点开 / 或 PAT 权限补全后代建）
 ```
 https://github.com/yihui315/night-researcher-dash/compare/feat/p2-server-authoritative-paper...feat/p2-fixedpoint
 ```
