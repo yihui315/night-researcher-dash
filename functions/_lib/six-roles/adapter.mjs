@@ -17,7 +17,7 @@ export const PROVIDER_PRESETS = Object.freeze({
 });
 
 // Build a model caller bound to one provider/model identity.
-// config: { provider, model, apiKey, region, workspaceId, maxTokens, fetchImpl }
+// config: { provider, model, apiKey, region, workspaceId, maxTokens, thinkingMode, fetchImpl }
 // Returns an object: { provider, model, callModel(messages) -> Promise<{text, model, usage}> }
 export function createModelCaller(config = {}) {
   const preset = PROVIDER_PRESETS[config.provider] || {};
@@ -26,6 +26,9 @@ export function createModelCaller(config = {}) {
   const region = config.region || preset.region;
   const workspaceId = config.workspaceId || preset.workspaceId;
   const maxTokens = config.maxTokens == null ? 2048 : config.maxTokens;
+  // thinkingMode: "adaptive" | "disabled" (MiniMax only). For JSON-only structured roles,
+  // "disabled" avoids verbose reasoning truncation on MiniMax-M3.
+  const thinkingMode = config.thinkingMode || "adaptive";
   const fetchImpl = config.fetchImpl || globalThis.fetch;
 
   if (!["minimax", "qwen"].includes(provider)) {
@@ -36,7 +39,7 @@ export function createModelCaller(config = {}) {
     const request = new Request("https://night-researcher.local/api/ai/chat", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "https://night-researcher.local" },
-      body: JSON.stringify({ provider, model, apiKey: config.apiKey, region, workspaceId, maxTokens, messages })
+      body: JSON.stringify({ provider, model, apiKey: config.apiKey, region, workspaceId, maxTokens, thinkingMode, messages })
     });
     const response = await handleAiChat(request, fetchImpl);
     const data = await response.json();
