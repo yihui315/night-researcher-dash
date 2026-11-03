@@ -1,0 +1,12 @@
+{
+  "id": "mean-reversion-sma5",
+  "version": "v1.0.0",
+  "params": {
+    "lookback": 5,
+    "entryThreshold": 0.997,
+    "feeRate": 0.001,
+    "slippageRate": 0.0005
+  },
+  "hash": "dec9828b",
+  "frozenAt": "2026-11-02T22:40:28.157Z"
+}
