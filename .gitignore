@@ -13,3 +13,9 @@ output/
 
 # 系统
 .DS_Store
+
+# Pages 构建产物（由 npm run build 生成，无需入库）
+dist/
+
+# Git worktree 容器（隔离开发分支，不入库）
+.wt/

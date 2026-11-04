@@ -7,6 +7,6 @@ compatibility_date = "2024-11-01"
 # 独立测试 D1 实例。生产部署时请改用生产 database_name / database_id，
 # 并通过环境变量或独立 wrangler 环境（[env.production]）隔离，绝不混用。
 [[d1_databases]]
-binding = "DB"
+binding = "PAPER_DB"
 database_name = "paper_test"
 database_id = "4fadf62a-965e-4ab7-bb89-b1c9cdaf9d0b"
