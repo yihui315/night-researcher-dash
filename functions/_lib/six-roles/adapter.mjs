@@ -9,6 +9,9 @@
 // message bounds) intact while allowing deterministic, network-free runs.
 
 import { handleAiChat } from "../ai-core.mjs";
+import { readFileSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Sensible default presets so callers don't have to know provider-specific quirks.
 export const PROVIDER_PRESETS = Object.freeze({
@@ -31,7 +34,24 @@ export function createModelCaller(config = {}) {
   const thinkingMode = config.thinkingMode || "adaptive";
   const fetchImpl = config.fetchImpl || globalThis.fetch;
 
-  if (!["minimax", "qwen"].includes(provider)) {
+  // ---- 离线 Mock-Replay 提供方：回放录制好的真实响应，无需任何 Key / 网络 ----
+  // 用于「没有可用 Provider 时」的接口验收与离线回归（V3.0 管理决定）。
+  // replayStorePath 指向 JSON：{ "SPOTTER": "<录制文本>", ... , "__default__": "..." }。
+  if (provider === "replay") {
+    const store = loadReplayStore(config.replayStorePath);
+    async function callModel(messages) {
+      const roleId = detectRoleId(messages) || "__default__";
+      const text = store[roleId] != null ? String(store[roleId]) : String(store.__default__ || "");
+      return {
+        text,
+        model: "replay",
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      };
+    }
+    return { provider: "replay", model: "replay", callModel };
+  }
+
+  if (!["minimax", "qwen", "replay"].includes(provider)) {
     throw new Error("不支持的 AI 服务商: " + provider);
   }
 
@@ -71,5 +91,28 @@ export function parseAgentObject(text) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : null;
   } catch (_) {
     return null;
+  }
+}
+
+// 从 messages 的 content 中抽取 AGENT_ID（callAiRole 会把角色名写入 AGENT_ID: <roleId>）。
+export function detectRoleId(messages) {
+  const joined = (messages || [])
+    .map((m) => (m && m.content) || "")
+    .join("\n");
+  const m = joined.match(/AGENT_ID:\s*([A-Za-z_]+)/);
+  return m ? m[1] : null;
+}
+
+export function defaultReplayStorePath() {
+  return join(dirname(fileURLToPath(import.meta.url)), "fixtures", "replay.json");
+}
+
+export function loadReplayStore(path) {
+  const p = path || defaultReplayStorePath();
+  if (!existsSync(p)) return {};
+  try {
+    return JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    return {};
   }
 }

@@ -1,0 +1,7 @@
+{
+  "__default__": "{\"note\":\"replay fallback\"}",
+  "SPOTTER": "{\"opportunities\":[{\"symbol\":\"BTCUSDT\",\"setup\":\"区间下沿均值回归观察\",\"evidence\":[\"snapshot.selectedSymbol=BTCUSDT\"],\"missing_data\":[\"逐笔成交明细\"],\"watch_only\":true}]}",
+  "PRIOR": "{\"regime\":\"range\",\"prior_confidence\":0.3,\"evidence\":[\"盘口双边挂单均衡\"],\"counter_evidence\":[\"成交量偏低\"],\"unknowns\":[\"资金流方向\"]}",
+  "EDGE": "{\"verdict\":\"RESEARCH\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"hypothesis\":\"区间下沿存在均值回归优势\",\"invalidation\":\"跌破区间下沿且放量\",\"edge_source\":\"结构观察\",\"entry_trigger\":\"回到区间下沿\",\"costs_to_test\":[\"手续费\",\"滑点\"],\"required_evidence\":[\"至少 30 笔样本回测\"]}",
+  "CLOSER": "{\"decision\":\"HOLD_RESEARCH\",\"exit_conditions\":[\"价格跌破区间下沿\"],\"failure_modes\":[\"样本不足导致伪优势\"],\"next_validation\":[\"补充逐笔成交样本后重算 EDGE\"],\"final_risk_note\":\"当前仅研究，不进入实盘\"}"
+}
