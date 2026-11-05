@@ -30,7 +30,7 @@ function verifiedEvidence(overrides = {}) {
     },
     oos: { verified: 1, oos_pass: 1, oos_trades: 50, folds: 3, ...(overrides.oos || {}) },
     performance: overrides.performance === undefined
-      ? { source: "real-d1-paper-fills", max_drawdown_pct: lib.ratioToFp(0.05) }
+      ? { source: "real-d1-paper-fills", riskBasis: "mark-to-market-equity-snapshots", sessions: 1, max_drawdown_pct: lib.ratioToFp(0.05) }
       : overrides.performance
   };
 }
@@ -68,7 +68,7 @@ test("sample thresholds are enforced even when verified=1", () => {
 
 test("real drawdown above 20% blocks release", () => {
   const d = lib.evaluateStrategyGate(verifiedEvidence({
-    performance: { source: "real-d1-paper-fills", max_drawdown_pct: lib.ratioToFp(0.25) }
+    performance: { source: "real-d1-paper-fills", riskBasis: "mark-to-market-equity-snapshots", sessions: 1, max_drawdown_pct: lib.ratioToFp(0.25) }
   }));
   assert.equal(d.eligible, false);
   assert.ok(d.reasons.some(r => r.includes("最大回撤")));
@@ -90,6 +90,34 @@ test("fully server-verified evidence -> ELIGIBLE with deterministic quarter-Kell
   assert.equal(d.kelly.method, "quarter-kelly-wilson-lower-bound");
   assert.ok(d.kelly.allocationPct > 0 && d.kelly.allocationPct <= 0.10);
   assert.equal(d.autoExecution, false);
+});
+
+test("verified backtest/OOS still fail closed when real Paper performance is unavailable", () => {
+  const d = lib.evaluateStrategyGate(verifiedEvidence({ performance: null }));
+  assert.equal(d.eligible, false);
+  assert.equal(d.status, "NOT_ELIGIBLE");
+  assert.equal(d.kelly.status, "BLOCKED");
+  assert.equal(d.evidence.performanceAvailable, false);
+  assert.ok(d.reasons.some(r => r.includes("权益快照")));
+});
+
+test("realized-PnL-only statistics cannot satisfy the account drawdown release gate", () => {
+  const d = lib.evaluateStrategyGate(verifiedEvidence({
+    performance: { source: "real-d1-paper-fills", riskBasis: "realized-pnl-only", sessions: 1, max_drawdown_pct: 0 }
+  }));
+  assert.equal(d.eligible, false);
+  assert.equal(d.kelly.status, "BLOCKED");
+  assert.equal(d.evidence.performanceAvailable, false);
+  assert.ok(d.reasons.some(r => r.includes("权益快照")));
+});
+
+test("performance from an unknown source cannot satisfy the release gate", () => {
+  const d = lib.evaluateStrategyGate(verifiedEvidence({
+    performance: { source: "client-json", sessions: 1, max_drawdown_pct: 0 }
+  }));
+  assert.equal(d.eligible, false);
+  assert.equal(d.kelly.status, "BLOCKED");
+  assert.equal(d.evidence.performanceAvailable, false);
 });
 
 test("buildKellyMetrics only trusts verified rows and parses metrics_json", () => {
@@ -132,6 +160,36 @@ test("daily performance is computed only from real fill rows (1e8 fixed point)",
   assert.ok(Math.abs(lib.fpToRatio(perf.win_rate) - 2 / 3) < 1 / lib.SCALE);
   assert.ok(perf.max_drawdown_pct > 0 && perf.max_drawdown_pct < lib.ratioToFp(0.01));
   assert.equal(lib.computeDailyPerformance([], {}).sampleFills, 0);
+});
+
+test("daily drawdown retains the intraday peak-to-trough maximum after recovery", () => {
+  const rows = [
+    { fill_id: "F1", session_id: "S1", created_at: "2026-11-05T01:00:00.000Z", realized_pnl: -1000000000, fee: 0 },
+    { fill_id: "F2", session_id: "S1", created_at: "2026-11-05T02:00:00.000Z", realized_pnl: 1000000000, fee: 0 }
+  ];
+  const perf = lib.computeDailyPerformance(rows, { S1: 10000 });
+  assert.equal(perf.days.length, 1);
+  assert.equal(perf.days[0].max_drawdown_pct, lib.ratioToFp(0.001));
+  assert.equal(perf.max_drawdown_pct, lib.ratioToFp(0.001));
+});
+
+test("performance window excludes pre-reset fills and carries pre-window PnL into baseline", () => {
+  const accounts = [{
+    session_id: "S1",
+    created_at: "2026-11-01T00:00:00.000Z",
+    state_json: JSON.stringify({ initialCash: 10000, generation: 2 })
+  }];
+  const resets = [{ session_id: "S1", reset_at: "2026-11-04T00:00:00.000Z" }];
+  const fills = [
+    { fill_id: "OLD", session_id: "S1", created_at: "2026-11-03T12:00:00.000Z", realized_pnl: -90000000000, fee: 0 },
+    { fill_id: "PRE", session_id: "S1", created_at: "2026-11-04T12:00:00.000Z", realized_pnl: 20000000, fee: 1000000 },
+    { fill_id: "IN", session_id: "S1", created_at: "2026-11-05T12:00:00.000Z", realized_pnl: -10000000, fee: 1000000 }
+  ];
+  const window = lib.buildPerformanceWindow(accounts, resets, fills, "2026-11-05T00:00:00.000Z");
+  assert.equal(window.fillRows.length, 1);
+  assert.equal(window.fillRows[0].fill_id, "IN");
+  assert.equal(window.baselineBySession.S1.fixedPoint, 10000 * lib.SCALE + 19000000);
+  assert.equal(window.sessionWindowStarts.S1, "2026-11-05T00:00:00.000Z");
 });
 
 test("regression: a losing FIRST fill must produce a non-zero drawdown", () => {
