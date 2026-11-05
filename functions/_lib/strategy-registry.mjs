@@ -98,13 +98,14 @@ export function evaluateStrategyGate(input) {
   const performanceUsable = !!(
     performance &&
     performance.source === "real-d1-paper-fills" &&
+    performance.riskBasis === "mark-to-market-equity-snapshots" &&
     Number.isSafeInteger(Number(performance.sessions)) &&
     Number(performance.sessions) > 0 &&
     Number.isSafeInteger(Number(performance.max_drawdown_pct)) &&
     Number(performance.max_drawdown_pct) >= 0
   );
   if (!performanceUsable) {
-    reasons.push("缺少可用的服务端真实 Paper 账户绩效；账户基线、重置代次或回撤数据不可验证时一律不放行");
+    reasons.push("缺少可用的服务端真实 Paper 权益快照；仅有已实现盈亏不足以验证最大回撤，必须 fail-closed");
   } else if (fpToRatio(performance.max_drawdown_pct) > MAX_DRAWDOWN) {
     reasons.push(`真实账户最大回撤超过 ${MAX_DRAWDOWN * 100}%`);
   }
@@ -124,7 +125,8 @@ export function evaluateStrategyGate(input) {
       backtestVerified: Number(backtest && backtest.verified) === 1,
       oosVerified: Number(oos && oos.verified) === 1,
       performanceAvailable: performanceUsable,
-      performanceSource: performance ? performance.source : null
+      performanceSource: performance ? performance.source : null,
+      performanceRiskBasis: performance ? performance.riskBasis : null
     }
   };
 }
@@ -513,6 +515,7 @@ export async function handleStrategyEvaluate(request, env) {
         backtestVerified: decision.evidence.backtestVerified,
         oosVerified: decision.evidence.oosVerified,
         performanceSource: decision.evidence.performanceSource,
+        performanceRiskBasis: decision.evidence.performanceRiskBasis,
         lifecycleAfter, at
       }
     });
