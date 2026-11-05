@@ -6,7 +6,14 @@ compatibility_date = "2024-11-01"
 
 # 独立测试 D1 实例。生产部署时请改用生产 database_name / database_id，
 # 并通过环境变量或独立 wrangler 环境（[env.production]）隔离，绝不混用。
+#
+# V4.2 PHASE 2 修复（契约一致性）：functions/_lib/paper-server.mjs 与
+# paper-ledger.mjs 全部读取 `env.PAPER_DB`；此前 binding = "DB" 导致
+# `wrangler dev --local` 下 env.PAPER_DB 为 undefined，所有 /api/paper/*
+# 请求返回 503。此处将 binding 与代码实际引用对齐。
+# 本改动只作用于本地测试绑定，不涉及 Cloudflare 生产环境。
 [[d1_databases]]
-binding = "DB"
+binding = "PAPER_DB"
 database_name = "paper_test"
 database_id = "4fadf62a-965e-4ab7-bb89-b1c9cdaf9d0b"
+migrations_dir = "migrations"

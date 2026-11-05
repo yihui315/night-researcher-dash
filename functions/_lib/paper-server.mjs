@@ -201,7 +201,15 @@ function updateRiskMarks(account, marks) {
 }
 
 async function fetchJson(fetcher, url) {
-  const response = await fetcher(url, { cache: "no-store", headers: { accept: "application/json" } });
+  // V4.2 PHASE 2 修复（真实 E2E run3 发现）：Cloudflare Workers / miniflare 的
+  // RequestInit 不实现浏览器专属的 `cache` 字段，传入会直接抛
+  // "The 'cache' field on 'RequestInitializerDict' is not implemented."，
+  // 导致 fetchMarketContext 失败、订单被 REJECTED（409）。
+  // 与 agent-orchestrator / ai-core / paper-ledger 保持一致：用标准
+  // cache-control 请求头表达 no-store 意图；Workers fetch 本身不做隐式缓存。
+  const response = await fetcher(url, {
+    headers: { accept: "application/json", "cache-control": "no-store, max-age=0" }
+  });
   if (!response || !response.ok) throw new Error("MARKET_HTTP_" + (response && response.status || "ERROR"));
   return response.json();
 }
@@ -565,23 +573,42 @@ function rejectionOrder(input, error) {
   return order;
 }
 
+/**
+ * V4.2 PHASE 2 修复（真实 E2E 发现，证据 phase3_e2e_run2_FAILED_evidence.json）：
+ * D1 的 `.bind()` 不接受 BigInt，而 0003_fixed_point.sql 将金额列定义为
+ * INTEGER（值 = 实际值 * 1e8）。orderRow()/fillRow() 直接把 D() 的 BigInt
+ * 定点数交给 bind，导致所有下单/撤单/重置写入返回
+ * `D1_TYPE_ERROR: Type 'bigint' not supported ...` (503)。
+ *
+ * 这里只做类型桥接，不改变数值语义：BigInt 缩放整数 -> Number 缩放整数。
+ * 账户规模下该值远小于 2^53；若超出安全范围则显式抛错，绝不静默丢精度。
+ */
+function d1BindValues(values) {
+  return values.map((v) => {
+    if (typeof v !== "bigint") return v;
+    const n = Number(v);
+    if (!Number.isSafeInteger(n)) throw new Error("D1_FIXED_POINT_OUT_OF_SAFE_RANGE");
+    return n;
+  });
+}
+
 function orderRow(order, sessionId, requestHash) {
-  return [
+  return d1BindValues([
     order.id, sessionId, order.clientOrderId, order.requestHash || requestHash, order.confirmationId,
     order.symbol, order.side, order.type, D(order.qty), D(order.filledQty), D(order.remainingQty),
     order.limitPrice == null ? null : D(order.limitPrice), order.status, order.avgFillPrice == null ? null : D(order.avgFillPrice),
     D(order.fee), order.realizedPnl == null ? null : D(order.realizedPnl),
     D(order.reservedCash), D(order.reservedQty), order.rejectionCode, order.reason,
     order.bookSequence, order.bookReceivedAt, order.createdAt, order.updatedAt, order.terminalAt
-  ];
+  ]);
 }
 
 function fillRow(fill, order, sessionId, index) {
-  return [
+  return d1BindValues([
     fill.id, order.id, sessionId, index, fill.symbol, fill.side, D(fill.qty), D(fill.price),
     D(fill.notional), D(fill.fee), fill.realizedPnl == null ? null : D(fill.realizedPnl), fill.liquidityModel,
     fill.bookSequence, fill.bookReceivedAt, fill.timestamp
-  ];
+  ]);
 }
 
 async function commitState(db, sessionId, current, account, commandId, options = {}) {
