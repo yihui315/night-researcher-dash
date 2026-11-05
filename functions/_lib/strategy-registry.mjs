@@ -95,7 +95,17 @@ export function evaluateStrategyGate(input) {
     }
   }
 
-  if (performance && fpToRatio(performance.max_drawdown_pct) > MAX_DRAWDOWN) {
+  const performanceUsable = !!(
+    performance &&
+    performance.source === "real-d1-paper-fills" &&
+    Number.isSafeInteger(Number(performance.sessions)) &&
+    Number(performance.sessions) > 0 &&
+    Number.isSafeInteger(Number(performance.max_drawdown_pct)) &&
+    Number(performance.max_drawdown_pct) >= 0
+  );
+  if (!performanceUsable) {
+    reasons.push("缺少可用的服务端真实 Paper 账户绩效；账户基线、重置代次或回撤数据不可验证时一律不放行");
+  } else if (fpToRatio(performance.max_drawdown_pct) > MAX_DRAWDOWN) {
     reasons.push(`真实账户最大回撤超过 ${MAX_DRAWDOWN * 100}%`);
   }
 
@@ -113,6 +123,7 @@ export function evaluateStrategyGate(input) {
       hasVersion: !!version,
       backtestVerified: Number(backtest && backtest.verified) === 1,
       oosVerified: Number(oos && oos.verified) === 1,
+      performanceAvailable: performanceUsable,
       performanceSource: performance ? performance.source : null
     }
   };
@@ -136,7 +147,12 @@ export function computeDailyPerformance(fillRows, baselineBySession = {}) {
   // from the pre-trade baseline. Otherwise a losing first fill becomes the
   // peak and reports max_drawdown_pct = 0, disabling the auto-pause gate.
   for (const [sid, baseline] of Object.entries(baselineBySession)) {
-    const baselineFp = safeNum(baseline) * SCALE;
+    const baselineFp = baseline && typeof baseline === "object" && Number.isSafeInteger(Number(baseline.fixedPoint))
+      ? Number(baseline.fixedPoint)
+      : Math.round(safeNum(baseline) * SCALE);
+    if (!Number.isSafeInteger(baselineFp) || baselineFp <= 0) {
+      throw new Error("INVALID_PERFORMANCE_BASELINE:" + sid);
+    }
     sessions[sid] = { baselineFp, cumulativeFp: 0, equityFp: baselineFp };
   }
   const days = new Map();
@@ -147,7 +163,7 @@ export function computeDailyPerformance(fillRows, baselineBySession = {}) {
   for (const row of rows) {
     const sid = String(row.session_id || "unknown");
     if (!sessions[sid]) {
-      sessions[sid] = { baselineFp: 0, cumulativeFp: 0, equityFp: 0 };
+      throw new Error("MISSING_SESSION_PERFORMANCE_BASELINE:" + sid);
     }
     const s = sessions[sid];
     const grossFp = safeNum(row.realized_pnl);
@@ -174,7 +190,7 @@ export function computeDailyPerformance(fillRows, baselineBySession = {}) {
     d.fees += feeFp;
     d.net_pnl += netFp;
     d.win_rate = d.trades > 0 ? ratioToFp(d.wins / d.trades) : 0;
-    d.max_drawdown_pct = ratioToFp(drawdown);
+    d.max_drawdown_pct = Math.max(d.max_drawdown_pct, ratioToFp(drawdown));
   }
 
   const dayList = [...days.values()];
@@ -232,22 +248,101 @@ function guardTables(error, label) {
   }, 503);
 }
 
-async function loadRealPerformance(env, days) {
-  const since = new Date(Date.now() - Math.max(1, Math.min(days, 365)) * 86400000).toISOString();
-  const [fills, accounts] = await Promise.all([
-    env.PAPER_DB.prepare(
-      "SELECT fill_id, session_id, created_at, realized_pnl, fee FROM paper_fills WHERE created_at >= ? ORDER BY created_at, fill_id"
-    ).bind(since).all(),
-    env.PAPER_DB.prepare("SELECT session_id, state_json FROM paper_accounts").all()
-  ]);
-  const baselineBySession = {};
-  for (const row of accounts.results || []) {
-    try {
-      const state = JSON.parse(row.state_json || "{}");
-      baselineBySession[String(row.session_id)] = safeNum(state.initialCash);
-    } catch (_) { /* unreadable snapshot -> baseline 0, never fabricated */ }
+export function buildPerformanceWindow(accountRows, resetRows, allFillRows, sinceIso) {
+  const sinceMs = Date.parse(sinceIso);
+  if (!Number.isFinite(sinceMs)) throw new Error("INVALID_PERFORMANCE_WINDOW");
+  const resetBySession = new Map(
+    (resetRows || []).map(row => [String(row.session_id), String(row.reset_at || "")])
+  );
+  const fillsBySession = new Map();
+  for (const row of allFillRows || []) {
+    const sid = String(row.session_id || "");
+    if (!sid) throw new Error("FILL_SESSION_MISSING");
+    if (!fillsBySession.has(sid)) fillsBySession.set(sid, []);
+    fillsBySession.get(sid).push(row);
   }
-  return computeDailyPerformance(fills.results || [], baselineBySession);
+
+  const baselineBySession = {};
+  const windowRows = [];
+  const sessionWindowStarts = {};
+  for (const account of accountRows || []) {
+    const sid = String(account.session_id || "");
+    if (!sid) throw new Error("ACCOUNT_SESSION_MISSING");
+    let state;
+    try { state = JSON.parse(account.state_json || "{}"); }
+    catch (_) { throw new Error("ACCOUNT_STATE_UNREADABLE:" + sid); }
+    const initialCash = Number(state.initialCash);
+    if (!Number.isFinite(initialCash) || initialCash <= 0) {
+      throw new Error("ACCOUNT_INITIAL_CASH_INVALID:" + sid);
+    }
+
+    const resetAt = resetBySession.get(sid) || String(account.created_at || "");
+    const resetMs = Date.parse(resetAt);
+    if (!Number.isFinite(resetMs)) throw new Error("ACCOUNT_BASELINE_TIME_INVALID:" + sid);
+    const windowStartMs = Math.max(sinceMs, resetMs);
+    const windowStart = new Date(windowStartMs).toISOString();
+    let baselineFp = Math.round(initialCash * SCALE);
+    if (!Number.isSafeInteger(baselineFp) || baselineFp <= 0) {
+      throw new Error("ACCOUNT_BASELINE_OUT_OF_RANGE:" + sid);
+    }
+
+    for (const fill of fillsBySession.get(sid) || []) {
+      const fillMs = Date.parse(fill.created_at || "");
+      if (!Number.isFinite(fillMs)) throw new Error("FILL_TIMESTAMP_INVALID:" + sid);
+      if (fillMs < resetMs) continue; // fills from an earlier account generation are excluded
+      const realized = Number(fill.realized_pnl || 0);
+      const fee = Number(fill.fee || 0);
+      if (!Number.isSafeInteger(realized) || !Number.isSafeInteger(fee)) {
+        throw new Error("FILL_FIXED_POINT_INVALID:" + sid);
+      }
+      if (fillMs < windowStartMs) {
+        baselineFp += realized - fee; // carry pre-window realized PnL into the window-start equity
+      } else {
+        windowRows.push(fill);
+      }
+    }
+    if (!Number.isSafeInteger(baselineFp) || baselineFp <= 0) {
+      throw new Error("PERFORMANCE_BASELINE_DEPLETED:" + sid);
+    }
+    baselineBySession[sid] = { fixedPoint: baselineFp };
+    sessionWindowStarts[sid] = windowStart;
+  }
+
+  windowRows.sort((a, b) => {
+    const ta = String(a.created_at || ""), tb = String(b.created_at || "");
+    if (ta !== tb) return ta < tb ? -1 : 1;
+    return String(a.fill_id || "").localeCompare(String(b.fill_id || ""));
+  });
+  return { fillRows: windowRows, baselineBySession, sessionWindowStarts };
+}
+
+async function loadRealPerformance(env, days) {
+  const windowStart = new Date(Date.now() - Math.max(1, Math.min(days, 365)) * 86400000).toISOString();
+  const [accounts, resets] = await Promise.all([
+    env.PAPER_DB.prepare("SELECT session_id, state_json, created_at FROM paper_accounts").all(),
+    env.PAPER_DB.prepare(
+      "SELECT session_id, MAX(created_at) AS reset_at FROM paper_server_events WHERE event_type = 'paper.server.account.reset' GROUP BY session_id"
+    ).all()
+  ]);
+  const accountRows = accounts.results || [];
+  const resetRows = resets.results || [];
+  const resetBySession = new Map(resetRows.map(row => [String(row.session_id), String(row.reset_at || "")]));
+  const fillSets = await Promise.all(accountRows.map(account => {
+    const sid = String(account.session_id || "");
+    const startAt = resetBySession.get(sid) || String(account.created_at || "");
+    return env.PAPER_DB.prepare(
+      "SELECT fill_id, session_id, created_at, realized_pnl, fee FROM paper_fills WHERE session_id = ? AND created_at >= ? ORDER BY created_at, fill_id"
+    ).bind(sid, startAt).all();
+  }));
+  const allFillRows = fillSets.flatMap(result => result.results || []);
+  const window = buildPerformanceWindow(accountRows, resetRows, allFillRows, windowStart);
+  const performance = computeDailyPerformance(window.fillRows, window.baselineBySession);
+  return {
+    ...performance,
+    windowDays: Math.max(1, Math.min(days, 365)),
+    requestedWindowStart: windowStart,
+    sessionWindowStarts: window.sessionWindowStarts
+  };
 }
 
 export async function handleStrategyVersions(request, env) {
@@ -356,12 +451,20 @@ export async function handleStrategyEvaluate(request, env) {
     const db = env.PAPER_DB;
     const version = await db.prepare("SELECT * FROM strategy_versions WHERE strategy_id = ?")
       .bind(strategyId).first();
-    const backtest = await db.prepare(
-      "SELECT * FROM backtest_results WHERE strategy_id = ? AND verified = 1 ORDER BY computed_at DESC LIMIT 1"
-    ).bind(strategyId).first();
-    const oos = await db.prepare(
-      "SELECT * FROM oos_results WHERE strategy_id = ? AND verified = 1 ORDER BY computed_at DESC LIMIT 1"
-    ).bind(strategyId).first();
+    let backtest = null;
+    let oos = null;
+    if (version) {
+      // Backtest and OOS evidence must belong to the SAME verified research run
+      // and the exact registered strategy version; never combine stale rows.
+      backtest = await db.prepare(
+        "SELECT bt.* FROM backtest_results bt JOIN research_runs rr ON rr.run_id = bt.run_id WHERE bt.strategy_id = ? AND rr.strategy_version = ? AND rr.status = 'verified' AND bt.verified = 1 ORDER BY bt.computed_at DESC LIMIT 1"
+      ).bind(strategyId, version.version).first();
+      if (backtest) {
+        oos = await db.prepare(
+          "SELECT o.* FROM oos_results o JOIN research_runs rr ON rr.run_id = o.run_id WHERE o.strategy_id = ? AND o.run_id = ? AND rr.strategy_version = ? AND rr.status = 'verified' AND o.verified = 1 ORDER BY o.computed_at DESC LIMIT 1"
+        ).bind(strategyId, backtest.run_id, version.version).first();
+      }
+    }
     let performance = null;
     let performanceError = null;
     try {
@@ -370,7 +473,7 @@ export async function handleStrategyEvaluate(request, env) {
       performanceError = String(error && error.message || error).slice(0, 200);
     }
     const decision = evaluateStrategyGate({ version, backtest, oos, performance });
-    if (!performance) decision.reasons.push("真实绩效数据不可用：" + (performanceError || "unknown"));
+    if (!performance && performanceError) decision.performanceError = performanceError;
 
     const rejectionId = clientActionId + ":strategy-gate";
     const gate = decision.status === "SUSPEND" ? "auto.pause" : "strategy.release";
@@ -421,5 +524,5 @@ export async function handleStrategyEvaluate(request, env) {
 
 export const __test = {
   evaluateStrategyGate, buildKellyMetrics, computeDailyPerformance,
-  fpToRatio, ratioToFp, SCALE
+  buildPerformanceWindow, fpToRatio, ratioToFp, SCALE
 };
