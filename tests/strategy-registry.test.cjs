@@ -68,7 +68,7 @@ test("sample thresholds are enforced even when verified=1", () => {
 
 test("real drawdown above 20% blocks release", () => {
   const d = lib.evaluateStrategyGate(verifiedEvidence({
-    performance: { source: "real-d1-paper-fills", max_drawdown_pct: lib.ratioToFp(0.25) }
+    performance: { source: "real-d1-paper-fills", riskBasis: "mark-to-market-equity-snapshots", sessions: 1, max_drawdown_pct: lib.ratioToFp(0.25) }
   }));
   assert.equal(d.eligible, false);
   assert.ok(d.reasons.some(r => r.includes("最大回撤")));
