@@ -16,6 +16,8 @@ import {
   json, isSameOrigin, requireConfig, readSession, appendTrustedEvent
 } from "./paper-ledger.mjs";
 import { computeFractionalKelly } from "./agent-orchestrator.mjs";
+import { buildEquityRiskBasis } from "./equity-snapshot.mjs";
+import { appendStrategyEvent } from "./strategy-events.mjs";
 
 export const SCALE = 100_000_000; // 1e8 fixed point, matches 0003_fixed_point.sql
 const MAX_BODY_BYTES = 32_000;
@@ -102,12 +104,30 @@ export function evaluateStrategyGate(input) {
     Number.isSafeInteger(Number(performance.sessions)) &&
     Number(performance.sessions) > 0 &&
     Number.isSafeInteger(Number(performance.max_drawdown_pct)) &&
-    Number(performance.max_drawdown_pct) >= 0
+    Number(performance.max_drawdown_pct) >= 0 &&
+    performance.equityEvidence && performance.equityEvidence.usable === true &&
+    performance.equityEvidence.worstAccountWins !== false
   );
   if (!performanceUsable) {
     reasons.push("缺少可用的服务端真实 Paper 权益快照；仅有已实现盈亏不足以验证最大回撤，必须 fail-closed");
   } else if (fpToRatio(performance.max_drawdown_pct) > MAX_DRAWDOWN) {
     reasons.push(`真实账户最大回撤超过 ${MAX_DRAWDOWN * 100}%`);
+  }
+
+  // V4.3: verified=1 backtest/OOS rows are NOT enough. A real trust anchor
+  // (GitHub Actions OIDC or an approved HMAC service run) must have produced
+  // them. A local E2E run can write verified=1 to test the pipeline, but with
+  // trusted=0 it can NEVER open the release gate.
+  const receipt = input && input.receipt || null;
+  const receiptTrusted = !!(
+    receipt &&
+    Number(receipt.trusted) === 1 &&
+    (receipt.auth_method === "github-actions-oidc" || receipt.auth_method === "hmac-service") &&
+    String(receipt.run_id || "") === String((backtest && backtest.run_id) || "__no_backtest__") &&
+    typeof receipt.bundle_sha256 === "string" && /^[0-9a-f]{64}$/.test(receipt.bundle_sha256)
+  );
+  if (!receiptTrusted) {
+    reasons.push("研究证据缺少可信 Runner 来源回执；本地/浏览器提交的结果不得作为放行依据");
   }
 
   const eligible = reasons.length === 0;
@@ -126,7 +146,9 @@ export function evaluateStrategyGate(input) {
       oosVerified: Number(oos && oos.verified) === 1,
       performanceAvailable: performanceUsable,
       performanceSource: performance ? performance.source : null,
-      performanceRiskBasis: performance ? performance.riskBasis : null
+      performanceRiskBasis: performance ? performance.riskBasis : null,
+      receiptTrusted,
+      receiptAuthMethod: receipt ? receipt.auth_method : null
     }
   };
 }
@@ -339,8 +361,31 @@ async function loadRealPerformance(env, days) {
   const allFillRows = fillSets.flatMap(result => result.results || []);
   const window = buildPerformanceWindow(accountRows, resetRows, allFillRows, windowStart);
   const performance = computeDailyPerformance(window.fillRows, window.baselineBySession);
+
+  // V4.3 / PHASE 4 Step 2: the final release gate must use REAL
+  // mark-to-market equity snapshots, not realized PnL. Until snapshots exist
+  // (or if migration 0005 has not been applied) riskBasis stays
+  // 'realized-pnl-only' and evaluateStrategyGate() fails closed.
+  let riskBasis = "realized-pnl-only";
+  let equityEvidence = null;
+  try {
+    const risk = await buildEquityRiskBasis(env.PAPER_DB);
+    equityEvidence = risk;
+    if (risk.usable === true) {
+      riskBasis = "mark-to-market-equity-snapshots";
+      // Worst-account drawdown replaces the realized-PnL approximation.
+      performance.max_drawdown_pct = risk.max_drawdown_pct;
+    }
+  } catch (error) {
+    equityEvidence = {
+      usable: false, riskBasis: "realized-pnl-only",
+      reason: "EQUITY_SNAPSHOT_QUERY_FAILED",
+      detail: String(error && error.message || error).slice(0, 200)
+    };
+  }
   return {
     ...performance,
+    riskBasis, equityEvidence,
     windowDays: Math.max(1, Math.min(days, 365)),
     requestedWindowStart: windowStart,
     sessionWindowStarts: window.sessionWindowStarts
@@ -481,8 +526,21 @@ export async function handleStrategyEvaluate(request, env) {
     } catch (error) {
       performanceError = String(error && error.message || error).slice(0, 200);
     }
-    const decision = evaluateStrategyGate({ version, backtest, oos, performance });
+    // V4.3: a verified backtest row alone is not a trust anchor. The receipt
+    // must come from the SAME run and be backed by a real Runner identity.
+    let receipt = null;
+    let receiptError = null;
+    if (backtest) {
+      try {
+        receipt = await db.prepare("SELECT * FROM verification_receipts WHERE run_id = ?")
+          .bind(backtest.run_id).first();
+      } catch (error) {
+        receiptError = String(error && error.message || error).slice(0, 200);
+      }
+    }
+    const decision = evaluateStrategyGate({ version, backtest, oos, performance, receipt });
     if (!performance && performanceError) decision.performanceError = performanceError;
+    if (receiptError) decision.receiptError = receiptError;
 
     const rejectionId = clientActionId + ":strategy-gate";
     const gate = decision.status === "SUSPEND" ? "auto.pause" : "strategy.release";
@@ -505,6 +563,29 @@ export async function handleStrategyEvaluate(request, env) {
         lifecycleAfter = "suspended";
       }
     }
+    // V4.3: every evaluation (and especially every auto-pause) gets an
+    // independently replayable, hash-linked D1 event in strategy_events.
+    // This chain is separate from paper_server_events, so trading replay stays
+    // byte-for-byte untouched.
+    let strategyEvent = null;
+    let strategyEventError = null;
+    try {
+      strategyEvent = await appendStrategyEvent(db, strategyId,
+        decision.status === "SUSPEND" ? "strategy.auto.paused" : "strategy.gate.evaluated", {
+          clientActionId, at, status: decision.status, reasons: decision.reasons,
+          riskBasis: performance ? performance.riskBasis : null,
+          maxDrawdownPct: performance ? performance.max_drawdown_pct : null,
+          equitySnapshotCount: performance && performance.equityEvidence
+            ? (performance.equityEvidence.snapshotCount || 0) : 0,
+          receiptRunId: receipt ? receipt.run_id : null,
+          receiptAuthMethod: receipt ? receipt.auth_method : null,
+          receiptTrusted: decision.evidence.receiptTrusted,
+          lifecycleAfter, autoExecution: false
+        });
+    } catch (error) {
+      strategyEventError = String(error && error.message || error).slice(0, 200);
+    }
+
     const eventType = decision.eligible ? "strategy.gate.passed" : "strategy.gate.rejected";
     const eventEmitted = await appendTrustedEvent(request, env, {
       eventId: clientActionId + ":" + eventType,
@@ -524,6 +605,16 @@ export async function handleStrategyEvaluate(request, env) {
       reasons: decision.reasons, thresholds: decision.thresholds,
       evidence: decision.evidence, kelly: decision.kelly,
       rejectionWritten, eventType, eventEmitted, lifecycleAfter,
+      receipt: receipt ? {
+        runId: receipt.run_id, authMethod: receipt.auth_method,
+        trusted: Number(receipt.trusted) === 1,
+        bundleSha256: receipt.bundle_sha256,
+        commitSha: receipt.commit_sha, workflowRunId: receipt.workflow_run_id
+      } : null,
+      strategyEventHash: strategyEvent ? strategyEvent.hash : null,
+      strategyEventError,
+      riskBasis: performance ? performance.riskBasis : null,
+      equityEvidence: performance ? performance.equityEvidence : null,
       promotionApplied: false, autoExecution: false,
       note: "本端点仅做确定性判定与拒绝留痕；即使 ELIGIBLE 也不自动晋级、不下单。"
     });

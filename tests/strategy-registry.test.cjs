@@ -20,18 +20,41 @@ const GOOD_METRICS = {
   profitFactor: 1.8, maxDrawdown: 0.08
 };
 
+const RUN_ID = "run-unit-0001";
+const BUNDLE_SHA = "a".repeat(64);
+
+/**
+ * V4.3 contract extension: a passing offline fixture now needs THREE trust
+ * anchors (verified rows + REAL mark-to-market equity evidence + a trusted
+ * Runner receipt). No original assertion was removed; the fixture simply
+ * supplies the now-required evidence, and new tests below assert that each
+ * missing anchor fails closed.
+ */
 function verifiedEvidence(overrides = {}) {
+  const runId = (overrides.backtest && overrides.backtest.run_id) || RUN_ID;
   return {
     version: { ...VERSION, ...(overrides.version || {}) },
     backtest: {
+      run_id: RUN_ID,
       verified: 1, strategy_pass: 1, sample_count: 200,
       metrics_json: JSON.stringify(GOOD_METRICS),
       ...(overrides.backtest || {})
     },
     oos: { verified: 1, oos_pass: 1, oos_trades: 50, folds: 3, ...(overrides.oos || {}) },
     performance: overrides.performance === undefined
-      ? { source: "real-d1-paper-fills", riskBasis: "mark-to-market-equity-snapshots", sessions: 1, max_drawdown_pct: lib.ratioToFp(0.05) }
-      : overrides.performance
+      ? {
+          source: "real-d1-paper-fills",
+          riskBasis: "mark-to-market-equity-snapshots",
+          sessions: 1, max_drawdown_pct: lib.ratioToFp(0.05),
+          equityEvidence: {
+            usable: true, worstAccountWins: true, sessions: 1,
+            snapshotCount: 3, max_drawdown_pct: lib.ratioToFp(0.05)
+          }
+        }
+      : overrides.performance,
+    receipt: overrides.receipt === undefined
+      ? { run_id: runId, trusted: 1, auth_method: "github-actions-oidc", bundle_sha256: BUNDLE_SHA }
+      : overrides.receipt
   };
 }
 
@@ -68,7 +91,12 @@ test("sample thresholds are enforced even when verified=1", () => {
 
 test("real drawdown above 20% blocks release", () => {
   const d = lib.evaluateStrategyGate(verifiedEvidence({
-    performance: { source: "real-d1-paper-fills", riskBasis: "mark-to-market-equity-snapshots", sessions: 1, max_drawdown_pct: lib.ratioToFp(0.25) }
+    performance: {
+      source: "real-d1-paper-fills", riskBasis: "mark-to-market-equity-snapshots",
+      sessions: 1, max_drawdown_pct: lib.ratioToFp(0.25),
+      equityEvidence: { usable: true, worstAccountWins: true, sessions: 1,
+                        snapshotCount: 3, max_drawdown_pct: lib.ratioToFp(0.25) }
+    }
   }));
   assert.equal(d.eligible, false);
   assert.ok(d.reasons.some(r => r.includes("最大回撤")));
@@ -203,4 +231,60 @@ test("regression: a losing FIRST fill must produce a non-zero drawdown", () => {
   assert.ok(lib.fpToRatio(perf.max_drawdown_pct) < 0.01);
   assert.equal(perf.days[0].trades, 1);
   assert.equal(perf.days[0].wins, 0);
+});
+
+// ------------------------------------------------- V4.3 trusted Runner anchors
+
+test("V4.3: no trusted Runner receipt -> fail closed even with perfect evidence", () => {
+  const d = lib.evaluateStrategyGate(verifiedEvidence({ receipt: null }));
+  assert.equal(d.eligible, false);
+  assert.equal(d.evidence.receiptTrusted, false);
+  assert.ok(d.reasons.some(r => r.includes("可信 Runner")));
+  assert.equal(d.kelly.status, "BLOCKED");
+});
+
+test("V4.3: a local E2E / browser receipt (trusted=0) must NOT open release", () => {
+  const d = lib.evaluateStrategyGate(verifiedEvidence({
+    receipt: { run_id: RUN_ID, trusted: 0, auth_method: "hmac-service-local-e2e", bundle_sha256: BUNDLE_SHA }
+  }));
+  assert.equal(d.eligible, false);
+  assert.equal(d.evidence.receiptTrusted, false);
+});
+
+test("V4.3: receipt from a different research run is rejected", () => {
+  const d = lib.evaluateStrategyGate(verifiedEvidence({
+    receipt: { run_id: "run-other", trusted: 1, auth_method: "github-actions-oidc", bundle_sha256: BUNDLE_SHA }
+  }));
+  assert.equal(d.eligible, false);
+  assert.equal(d.evidence.receiptTrusted, false);
+});
+
+test("V4.3: browser / unknown auth method is rejected", () => {
+  const d = lib.evaluateStrategyGate(verifiedEvidence({
+    receipt: { run_id: RUN_ID, trusted: 1, auth_method: "browser", bundle_sha256: BUNDLE_SHA }
+  }));
+  assert.equal(d.eligible, false);
+});
+
+test("V4.3: a riskBasis string without REAL equity snapshot evidence is rejected", () => {
+  const d = lib.evaluateStrategyGate(verifiedEvidence({
+    performance: {
+      source: "real-d1-paper-fills",
+      riskBasis: "mark-to-market-equity-snapshots",
+      sessions: 1, max_drawdown_pct: 0
+      // deliberately no equityEvidence
+    }
+  }));
+  assert.equal(d.eligible, false);
+  assert.equal(d.evidence.performanceAvailable, false);
+  assert.ok(d.reasons.some(r => r.includes("权益快照")));
+});
+
+test("V4.3: even a fully trusted ELIGIBLE decision never enables autoExecution", () => {
+  const d = lib.evaluateStrategyGate(verifiedEvidence());
+  assert.equal(d.eligible, true);
+  assert.equal(d.status, "ELIGIBLE");
+  assert.equal(d.autoExecution, false);
+  assert.equal(d.evidence.receiptTrusted, true);
+  assert.equal(d.evidence.performanceRiskBasis, "mark-to-market-equity-snapshots");
 });

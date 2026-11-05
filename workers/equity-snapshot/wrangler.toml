@@ -1,0 +1,19 @@
+# JEV V4.3 - mark-to-market equity snapshot Scheduled Worker.
+# DEPLOYMENT IS MANUALLY APPROVED. This is a separate Worker, not a Pages
+# Functions route; the D1 binding MUST reference the same database as the
+# Night Researcher paper ledger, and must be confirmed by a human before any
+# production deploy.
+name = "jev-equity-snapshot"
+main = "index.js"
+compatibility_date = "2024-11-01"
+
+[triggers]
+crons = ["* * * * *"]
+
+# Local development uses the same local D1 as the Pages dev server. For
+# production a human must set database_id to the real D1 UUID and verify that
+# the binding name PAPER_DB matches functions/_lib/paper-server.mjs.
+[[d1_databases]]
+binding = "PAPER_DB"
+database_name = "paper_test"
+database_id = "4fadf62a-965e-4ab7-bb89-b1c9cdaf9d0b"

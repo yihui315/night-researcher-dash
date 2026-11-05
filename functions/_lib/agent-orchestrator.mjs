@@ -205,7 +205,14 @@ async function sha256Hex(value) {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function handleAgentResearch(request, aiHandler = handleAiChat, env = null) {
+/**
+ * V4.3: `trustContext` is supplied ONLY by the HTTP route after a trusted
+ * service signature has been verified. When present, provider credentials come
+ * exclusively from that server-side context, so a browser-supplied apiKey is
+ * ignored. When absent (offline unit tests calling the handler directly) the
+ * legacy behaviour is preserved, but the real route never reaches it.
+ */
+export async function handleAgentResearch(request, aiHandler = handleAiChat, env = null, trustContext = null) {
   if (request.method !== "POST") return json({ error: "仅支持 POST" }, 405);
   const origin = request.headers.get("Origin");
   const requestOrigin = new URL(request.url).origin;
@@ -244,15 +251,16 @@ export async function handleAgentResearch(request, aiHandler = handleAiChat, env
     model: String(body.model || ""),
     promptVersion: "nr-agent-research-v1",
     startedAt,
-    snapshotSource: "browser-request-untrusted",
+    snapshotSource: (trustContext && trustContext.snapshotSource) || "browser-request-untrusted",
     snapshot
   });
+  const trustedCredentials = trustContext && trustContext.providerCredentials || null;
   const providerConfig = {
     provider: body.provider,
     model: body.model,
-    apiKey: body.apiKey,
-    region: body.region,
-    workspaceId: body.workspaceId,
+    apiKey: trustedCredentials ? trustedCredentials.apiKey : body.apiKey,
+    region: trustedCredentials ? trustedCredentials.region : body.region,
+    workspaceId: trustedCredentials ? trustedCredentials.workspaceId : body.workspaceId,
     thinkingMode: body.provider === "minimax" ? "disabled" : undefined,
     maxTokens: 8192
   };

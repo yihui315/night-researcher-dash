@@ -1,0 +1,137 @@
+# JEV V4.3 - Trusted Strategy Verification Runner.
+#
+# Reuses the REAL Python quant engine (scripts/build_verification_bundle.py ->
+# backtest_engine.py / strategies.py). No second engine, no NR_DEMO, no mock.
+#
+# This workflow is the ONLY producer of `trusted=1` receipts. It requests a
+# GitHub Actions OIDC ID token scoped to a dedicated audience; the Trusted
+# Verification API verifies the signature via JWKS and pins repository / ref /
+# commit sha / workflow ref before writing any verified row.
+#
+# DEPLOYMENT GATE (human approval, NOT done in this branch):
+#   - repo variable NR_VERIFICATION_URL must point at the deployed NR API base
+#   - NR service env NR_OIDC_AUDIENCE must equal the audience below
+#   - NR service env NR_OIDC_ALLOWED_REFS must include the allowed refs
+# Until NR_VERIFICATION_URL exists, this workflow still builds and archives a
+# REAL bundle but reports BLOCKED - it never fabricates a submission or a pass.
+
+name: Trusted Strategy Verification
+
+on:
+  schedule:
+    - cron: "0 17 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build REAL verification bundle (Binance klines + FNG + WF OOS + grid)
+        env:
+          GITHUB_WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          python scripts/build_verification_bundle.py \
+            --symbols BTCUSDT,ETHUSDT \
+            --strategies FNG_EMA_MR \
+            --output output/verification_bundle.json
+
+      - name: Archive machine-readable research evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-bundle-${{ github.run_id }}
+          path: output/verification_bundle.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Summarise REAL results (never assert a pass)
+        run: |
+          python - <<'PY'
+          import json
+          b = json.load(open("output/verification_bundle.json", encoding="utf-8"))
+          p = b["provenance"]
+          print("bundle_sha256:", b["bundle_sha256"])
+          print("runner:", p["runner"], "commit:", p["git_commit_sha"])
+          print("engine_sha256:", p["engine_sha256"])
+          print("strategy_source_sha256:", p["strategy_source_sha256"])
+          for r in b["runs"]:
+              m, g = r["metrics"], r["gates"]
+              print(f"{r['strategy_id']} {r['symbol']}: sample={m['sample_count']} "
+                    f"oos={m['oos_trades']} pass={g['strategy_pass']}/{g['oos_pass']} "
+                    f"reasons={g['reasons']}")
+          # A real strategy that fails the thresholds is a CORRECT fail-closed
+          # outcome. This step only proves the bundle was produced from real data.
+          assert b["runs"], "no research runs produced"
+          assert all(len(r["input_sha256"]) == 64 for r in b["runs"])
+          PY
+
+      - name: Request GitHub Actions OIDC ID token
+        id: oidc
+        if: ${{ vars.NR_VERIFICATION_URL != '' }}
+        run: |
+          TOKEN=$(curl -sS -f \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=jev-strategy-verification" \
+            | python -c 'import sys,json; print(json.load(sys.stdin)["value"])')
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Submit bundle to Trusted Verification API
+        if: ${{ vars.NR_VERIFICATION_URL != '' }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if curl -sS --max-time 60 --fail-with-body \
+              -X POST "${NR_VERIFICATION_URL}/api/verification/runs" \
+              -H "Content-Type: application/json" \
+              -H "X-GitHub-OIDC-Token: ${OIDC_TOKEN}" \
+              --data-binary @output/verification_bundle.json \
+              -o output/verification_result.json; then
+              echo "submission accepted on attempt $attempt"
+              break
+            fi
+            echo "submission attempt $attempt failed; retrying" >&2
+            if [ "$attempt" = "3" ]; then cat output/verification_result.json; exit 1; fi
+            sleep 5
+          done
+          python - <<'PY'
+          import json
+          r = json.load(open("output/verification_result.json", encoding="utf-8"))
+          print("authMethod:", r.get("authMethod"), "trusted:", r.get("trusted"))
+          print("verifiedRuns:", r.get("verifiedRuns"), "trustedRuns:", r.get("trustedRuns"))
+          assert r.get("ok") is True, r
+          assert r.get("authMethod") == "github-actions-oidc", r
+          assert r.get("trusted") == 1, "OIDC runner must be the trust anchor"
+          PY
+        env:
+          NR_VERIFICATION_URL: ${{ vars.NR_VERIFICATION_URL }}
+          OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
+
+      - name: Archive verification API response
+        if: ${{ vars.NR_VERIFICATION_URL != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-result-${{ github.run_id }}
+          path: output/verification_result.json
+          retention-days: 90
+
+      - name: BLOCKED - deployment endpoint not approved yet
+        if: ${{ vars.NR_VERIFICATION_URL == '' }}
+        run: |
+          echo "::warning::NR_VERIFICATION_URL is not configured."
+          echo "Real bundle was built and archived, but NO trusted submission happened."
+          echo "trusted=1 is therefore unreachable; the release gate stays fail-closed."
