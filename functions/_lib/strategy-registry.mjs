@@ -385,11 +385,18 @@ export async function handleResearchRuns(request, env) {
         ...run,
         backtest: bt && { verified: bt.verified, sample_count: bt.sample_count, strategy_pass: bt.strategy_pass },
         oos: o && { verified: o.verified, oos_pass: o.oos_pass, oos_trades: o.oos_trades, folds: o.folds },
-        eligibleForRelease: !!(bt && Number(bt.verified) === 1 && o && Number(o.verified) === 1)
+        evidenceThresholdsMet: !!(
+          run.status === "verified" &&
+          bt && Number(bt.verified) === 1 && Number(bt.strategy_pass) === 1 &&
+          safeNum(bt.sample_count) >= MIN_SAMPLE_COUNT &&
+          o && Number(o.verified) === 1 && Number(o.oos_pass) === 1 &&
+          safeNum(o.oos_trades) >= MIN_OOS_TRADES
+        ),
+        finalRiskGateRequired: true
       };
     });
     return json({ ok: true, source: "real-d1", count: items.length, runs: items,
-      note: "verified=0 的研究记录不得作为放行依据；本端点不接受客户端上报绩效。" });
+      note: "evidenceThresholdsMet 仅表示回测/OOS 证据阈值满足；最终放行仍必须调用 POST /api/strategy/evaluate 并通过真实账户绩效风控。" });
   } catch (error) {
     return guardTables(error, "research.runs");
   }
