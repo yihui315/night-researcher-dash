@@ -98,7 +98,7 @@ test("verified backtest/OOS still fail closed when real Paper performance is una
   assert.equal(d.status, "NOT_ELIGIBLE");
   assert.equal(d.kelly.status, "BLOCKED");
   assert.equal(d.evidence.performanceAvailable, false);
-  assert.ok(d.reasons.some(r => r.includes("真实 Paper 账户绩效")));
+  assert.ok(d.reasons.some(r => r.includes("权益快照")));
 });
 
 test("realized-PnL-only statistics cannot satisfy the account drawdown release gate", () => {
