@@ -30,7 +30,7 @@ function verifiedEvidence(overrides = {}) {
     },
     oos: { verified: 1, oos_pass: 1, oos_trades: 50, folds: 3, ...(overrides.oos || {}) },
     performance: overrides.performance === undefined
-      ? { source: "real-d1-paper-fills", sessions: 1, max_drawdown_pct: lib.ratioToFp(0.05) }
+      ? { source: "real-d1-paper-fills", riskBasis: "mark-to-market-equity-snapshots", sessions: 1, max_drawdown_pct: lib.ratioToFp(0.05) }
       : overrides.performance
   };
 }
@@ -99,6 +99,16 @@ test("verified backtest/OOS still fail closed when real Paper performance is una
   assert.equal(d.kelly.status, "BLOCKED");
   assert.equal(d.evidence.performanceAvailable, false);
   assert.ok(d.reasons.some(r => r.includes("真实 Paper 账户绩效")));
+});
+
+test("realized-PnL-only statistics cannot satisfy the account drawdown release gate", () => {
+  const d = lib.evaluateStrategyGate(verifiedEvidence({
+    performance: { source: "real-d1-paper-fills", riskBasis: "realized-pnl-only", sessions: 1, max_drawdown_pct: 0 }
+  }));
+  assert.equal(d.eligible, false);
+  assert.equal(d.kelly.status, "BLOCKED");
+  assert.equal(d.evidence.performanceAvailable, false);
+  assert.ok(d.reasons.some(r => r.includes("权益快照")));
 });
 
 test("performance from an unknown source cannot satisfy the release gate", () => {
