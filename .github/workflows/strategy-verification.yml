@@ -12,8 +12,16 @@
 #   - repo variable NR_VERIFICATION_URL must point at the deployed NR API base
 #   - NR service env NR_OIDC_AUDIENCE must equal the audience below
 #   - NR service env NR_OIDC_ALLOWED_REFS must include the allowed refs
-# Until NR_VERIFICATION_URL exists, this workflow still builds and archives a
-# REAL bundle but reports BLOCKED - it never fabricates a submission or a pass.
+#   - NR service env NR_OIDC_ALLOWED_WORKFLOW_REF must be pinned to THIS
+#     workflow's ref (server-side trust anchor; never read from the bundle)
+#   - NR service env NR_APPROVED_ENGINE_SHA256 must list the approved
+#     backtest_engine.py fingerprint(s). An unapproved engine can never yield
+#     verified=1 / trusted=1 (see functions/_lib/trust-anchors.mjs)
+#   - JEV: JEV_NR_SERVICE_SIGNING_SECRET (dedicated key, >= 32 chars),
+#     JEV_NR_RESEARCH_URL, and a configured+verified Provider credential
+# Until NR_VERIFICATION_URL and BOTH server anchors exist, this workflow still
+# builds and archives a REAL bundle but reports BLOCKED - it never fabricates a
+# submission or a pass.
 
 name: Trusted Strategy Verification
 

@@ -23,6 +23,9 @@ import {
 import {
   parseAndSealBundle, validateBundle, decideEvidence
 } from "../../_lib/verification.mjs";
+import {
+  readTrustAnchors, serverExpectedClaims, workflowAllowed
+} from "../../_lib/trust-anchors.mjs";
 import { STRATEGY_EVENT_TYPES } from "../../_lib/strategy-events.mjs";
 
 function badRequest(code, errors, extra = {}) {
@@ -53,6 +56,15 @@ export async function onRequest({ request, env }) {
   }
   const config = requireConfig(env);
   if (config.error) return config.error;
+  // V4.3 hardening: FAIL CLOSED when the server has not approved an exact
+  // trusted workflow AND an exact engine fingerprint. No evidence may be
+  // written (verified or trusted) until a human configures both anchors.
+  const anchors = readTrustAnchors(env);
+  if (!anchors.ok) {
+    return json({ ok: false, code: "TRUST_ANCHORS_NOT_CONFIGURED",
+                  errors: anchors.errors,
+                  error: "服务端尚未固定可信工作流与已批准引擎版本；证据写入保持阻断" }, 503);
+  }
   const raw = await request.text();
   if (new TextEncoder().encode(raw).byteLength > 512_000) {
     return json({ ok: false, code: "BODY_TOO_LARGE", error: "证据包过大" }, 413);
@@ -70,13 +82,16 @@ export async function onRequest({ request, env }) {
   let authError = null;
   if (oidcToken) {
     const provisionalProvenance = (parsed && parsed.provenance) || {};
-    const oidc = await verifyGithubOidc(oidcToken, env, {
-      repository: provisionalProvenance.repository,
-      commitSha: provisionalProvenance.git_commit_sha,
-      workflowRef: provisionalProvenance.workflow_ref
-    });
+    // Hardening (A): expected claims are built from SERVER config. The bundle's
+    // own `provenance.workflow_ref` is attacker-controlled and is NEVER used
+    // as the trust anchor any more.
+    const oidc = await verifyGithubOidc(
+      oidcToken, env, serverExpectedClaims(env, anchors, provisionalProvenance));
     if (!oidc.ok) {
       authError = json({ ok: false, code: "OIDC_VERIFICATION_FAILED", error: oidc.error }, 401);
+    } else if (!workflowAllowed(oidc.workflowRef, anchors)) {
+      authError = json({ ok: false, code: "OIDC_WORKFLOW_NOT_ALLOWED",
+                         error: "OIDC 工作流不在服务端可信白名单内" }, 401);
     } else {
       identity = {
         authMethod: "github-actions-oidc", trusted: 1,
@@ -120,7 +135,7 @@ export async function onRequest({ request, env }) {
       const versionRow = await db.prepare(
         "SELECT strategy_id, version, source_sha256, frozen, lifecycle FROM strategy_versions WHERE strategy_id = ?"
       ).bind(run.strategy_id).first();
-      const decision = decideEvidence(run, core, identity, versionRow, validation.ok);
+      const decision = decideEvidence(run, core, identity, versionRow, validation.ok, anchors);
       decisions.push({ runId: run.run_id, strategyId: run.strategy_id, symbol: run.symbol, ...decision });
       const p = core.provenance;
       const note = JSON.stringify({

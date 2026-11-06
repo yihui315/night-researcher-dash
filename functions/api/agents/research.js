@@ -8,9 +8,14 @@
  *      fed it into the research pipeline.
  *
  * Now the ONLY accepted caller is a signed service-to-service request from the
- * JEV Provider Center bridge (HMAC + timestamp + nonce replay protection, or a
- * GitHub Actions OIDC token). Browser sessions, cookies and Origin headers are
- * never sufficient. Browser-supplied credential fields are rejected outright.
+ * JEV Provider Center bridge (HMAC + timestamp + nonce replay protection).
+ * Browser sessions, cookies and Origin headers are never sufficient.
+ * Browser-supplied credential fields are rejected outright.
+ *
+ * V4.3 hardening: a generic GitHub Actions OIDC identity is NOT accepted here.
+ * OIDC is a TRUSTED STRATEGY VERIFICATION identity (see /api/verification/runs)
+ * with a server-pinned workflow; it must never double as a six-role research
+ * credential. Only the dedicated JEV HMAC service key may call this endpoint.
  *
  * Credentials arrive in `serviceCredentials` on the signed request, are used
  * only in memory, are stripped from the body BEFORE the orchestrator runs, and
@@ -23,9 +28,7 @@
  */
 import { handleAgentResearch } from "../../_lib/agent-orchestrator.mjs";
 import { json, requireConfig } from "../../_lib/paper-ledger.mjs";
-import {
-  verifyServiceSignature, verifyGithubOidc
-} from "../../_lib/service-auth.mjs";
+import { verifyServiceSignature } from "../../_lib/service-auth.mjs";
 import { appendStrategyEvent } from "../../_lib/strategy-events.mjs";
 
 const FORBIDDEN_CLIENT_FIELDS = [
@@ -42,19 +45,16 @@ export async function handleResearchRequest(request, env, handler = handleAgentR
 
   // (1) Origin is NEVER an authentication mechanism here. Require a real
   // service identity before even parsing the body.
-  const oidcToken = String(request.headers.get("X-GitHub-OIDC-Token") || "");
-  let identity;
-  if (oidcToken) {
-    const oidc = await verifyGithubOidc(oidcToken, env, {});
-    if (!oidc.ok) {
-      return json({ ok: false, code: "OIDC_VERIFICATION_FAILED", error: oidc.error }, 401);
-    }
-    identity = { authMethod: "github-actions-oidc", actor: oidc.actor };
-  } else {
-    const signed = await verifyServiceSignature(request, env, raw, { db: env.PAPER_DB });
-    if (!signed.ok) return signed.response;
-    identity = { authMethod: "hmac-service", actor: signed.actor };
+  // Hardening: OIDC is a strategy-verification identity, NOT a research
+  // credential. Reject it explicitly (fail closed) instead of silently
+  // downgrading to an unsigned path.
+  if (request.headers.get("X-GitHub-OIDC-Token")) {
+    return json({ ok: false, code: "SIX_ROLE_OIDC_IDENTITY_REJECTED",
+                  error: "六角色研究接口仅接受 JEV Provider Center 的 HMAC 服务身份；OIDC 身份不得复用" }, 401);
   }
+  const signed = await verifyServiceSignature(request, env, raw, { db: env.PAPER_DB });
+  if (!signed.ok) return signed.response;
+  const identity = { authMethod: "hmac-service", actor: signed.actor };
 
   let body;
   try {
