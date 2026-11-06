@@ -12,6 +12,7 @@
  *                 so evaluateStrategyGate() still refuses release.
  */
 import { sha256Hex } from "./service-auth.mjs";
+import { engineApproved, workflowAllowed } from "./trust-anchors.mjs";
 
 export const SCHEMA = "jev-verification-bundle/v1";
 export const MIN_SAMPLE_COUNT = 100;
@@ -151,7 +152,7 @@ export function validateBundle(core, identity) {
  * strategy_versions row; a missing / unfrozen / hash-mismatched version can
  * never yield verified=1.
  */
-export function decideEvidence(run, core, identity, versionRow, validationOk) {
+export function decideEvidence(run, core, identity, versionRow, validationOk, anchors = null) {
   const provenance = (core && core.provenance) || {};
   const checks = {
     validationOk: validationOk === true,
@@ -167,9 +168,23 @@ export function decideEvidence(run, core, identity, versionRow, validationOk) {
     oosTradesOk: Number(run.metrics && run.metrics.oos_trades) >= MIN_OOS_TRADES,
     foldsOk: Number(run.folds) === REQUIRED_FOLDS
   };
+  // V4.3 hardening (B): when server anchors are supplied, an unapproved
+  // engine fingerprint can never yield verified=1. `anchors === null` keeps
+  // the ORIGINAL pure-function contract byte-for-byte for the existing suite;
+  // the only production caller (verification/runs.js) ALWAYS passes anchors.
+  if (anchors) {
+    checks.engineApproved = engineApproved(provenance.engine_sha256, anchors);
+  }
   const verified = Object.values(checks).every(Boolean) ? 1 : 0;
   // A local / HMAC test run can NEVER become a release trust anchor.
-  const trusted = identity.authMethod === "github-actions-oidc" && identity.trusted === 1 ? 1 : 0;
+  // Hardening (A): a signed OIDC identity is trusted ONLY when its workflow
+  // ref is one of the server-allowed workflows.
+  const oidcTrusted = identity.authMethod === "github-actions-oidc" && identity.trusted === 1;
+  const trusted = anchors
+    // Hardening: the release trust anchor MUST ride on a verified decision.
+    // An unapproved engine (verified=0) can never produce trusted=1.
+    ? (verified === 1 && oidcTrusted && workflowAllowed(identity.workflowRef, anchors) ? 1 : 0)
+    : (oidcTrusted ? 1 : 0);
   return {
     verified,
     trusted,

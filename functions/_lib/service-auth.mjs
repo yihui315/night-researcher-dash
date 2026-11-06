@@ -200,6 +200,17 @@ export async function verifyGithubOidc(token, env, expected = {}, options = {}) 
   if (expected.workflowRef && claims.job_workflow_ref !== expected.workflowRef) {
     return { ok: false, error: "OIDC_WORKFLOW_MISMATCH" };
   }
+  // V4.3 hardening (A): a SERVER-configured allowlist is authoritative. Even
+  // if a caller supplies its own expected.workflowRef (or none at all), the
+  // signed claim must come from one of the workflows the server trusts.
+  // When the allowlist is absent the function stays usable for offline crypto
+  // unit tests, but the trusted verification ROUTE refuses to run without it
+  // (see functions/api/verification/runs.js) - fail closed at the write gate.
+  const serverRefs = String(env && env.NR_OIDC_ALLOWED_WORKFLOW_REF || "")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  if (serverRefs.length && !serverRefs.includes(String(claims.job_workflow_ref || ""))) {
+    return { ok: false, error: "OIDC_WORKFLOW_NOT_ALLOWED" };
+  }
   if (claims.runner_environment && claims.runner_environment !== "github-hosted") {
     return { ok: false, error: "OIDC_RUNNER_ENVIRONMENT_UNTRUSTED" };
   }
