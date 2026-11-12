@@ -1,6 +1,12 @@
 # 本地缓存（自动重新下载，无需入库）—— 仅忽略根目录 data/，绝不误伤 dashboard/data/
 /data/
 
+# Node 依赖（本地安装 wrangler 等，自动重装，无需入库）
+node_modules/
+
+# 自动生成的 Git 保护备份/快照（设计上应写到仓库之外，这里仅为兜底防污）
+.git-guard/
+
 # Python
 __pycache__/
 *.pyc
