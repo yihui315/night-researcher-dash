@@ -28,7 +28,7 @@ night_researcher/
 
 ## 3. 硬约束（务必遵守）
 
-- ❌ 不写下单代码、不给买卖建议（仅研究/回测）。
+- ❌ 不写真实资金下单代码、不发送真实订单；允许独立的本地模拟撮合与模拟风控，不连接钱包或交易所账户。
 - ❌ 不爬 X(Twitter) 等社媒；想法池由你**粘贴原帖链接 + 观点**提供。
 - ⚠️ 拿不到的数据（如永续资金费率）标「未知」，**绝不虚构**。
 
@@ -57,6 +57,20 @@ dashboard/
 
 - **临时/预览**：`workbuddy_sites_deploy` 发布 `dashboard/` 为静态站（已发布，线上链接见对话）；但这是静态快照，重跑 `run_research.py` 后需手动重新部署。
 - **无人值守（推荐）**：见 **`部署指南.md`** —— 把本目录作为仓库推到 GitHub，Cloudflare Pages 连通仓库（Build output directory = `dashboard`），由 `.github/workflows/night-researcher.yml` 每天 UTC 16:00 自动重跑 `run_research.py` 并推送 `research.json`，**Pages 自动重新部署**，线上随即为最新。RUNES / 爆仓 真实数据只需在仓库 Secrets 填入 `UNISAT_API_KEY` / `DUNE_API_KEY`(+`DUNE_RUNES_QUERY_ID`) / `COINGLASS_API_KEY` 即自动启用，无需改代码。
+
+## 3.3 AI Quant Trading 工作台（开发分支预览）
+
+- **AI API 独立输入页**：`/ai-settings.html`。可配置 MiniMax M3 或 Qwen Coder，填写区域、Workspace ID 和 API Key，并点击「测试 API 连接」。
+- **交易终端**：`/trading.html`。提供实时行情、K线、diff-depth 盘口、逐笔成交、模拟账户和 AI 六角色研究入口。
+- **服务端模拟账本（可选 D1）**：新增 `POST /api/paper/session`、`GET/POST /api/paper/ledger`、HMAC 签名 HttpOnly 会话、append-only 事件表和本地快照恢复。需要按 `docs/CLOUDFLARE_D1_PAPER_LEDGER_SETUP.md` 配置 D1 binding `PAPER_DB` 与 `PAPER_LEDGER_SECRET`；未配置时 UI 明确显示仅本地模式。
+- **研究可追踪**：六 Agent API 返回 `runId`、`snapshotHash`、prompt version、provider/model、耗时和 token usage；交易页将研究开始/完成/失败事件与模拟账户快照写入同一会话账本。
+- **信任边界**：当前 D1 是浏览器生成快照的审计/恢复日志，不是权威执行账本；不能作为 Kelly、策略晋级或实盘授权依据。服务端确定性模拟撮合仍是下一阶段。
+- **D1 配置指南**：`docs/CLOUDFLARE_D1_PAPER_LEDGER_SETUP.md`。
+- **JEV Trading Desk 适配器**：`integration/jev/tradingApi.mjs` + `.d.ts`，同源访问 JEV `/api/health` 与规划中的 `/api/v1/trading/*`；配套 WorkBuddy 本机集成 SOP：`docs/WORKBUDDY_JEV_TRADING_DESK_INTEGRATION.md`。适配器已单元测试，但 JEV 本机路由和 React 页面尚未写入。
+- **研究首页**：`/index.html`。顶部提供交易终端与 AI API 设置快捷入口。
+- **本地预览**：`cd dashboard && python -m http.server 8765`，访问 `http://localhost:8765/ai-settings.html` 或 `http://localhost:8765/trading.html`。
+- MiniMax 使用对应中国站 / 国际站的 API Key；Qwen 使用与 Workspace / 区域匹配的 Model Studio 通用 API Key。不要把 API Key 粘贴到聊天、提交到 Git 或写入浏览器存储。
+- 设置页只负责配置和连接测试；要让六角色团队读取真实页面行情快照，请从交易终端运行研究。所有模型输出均为研究提案，不能直接下单。
 
 ## 4. 研究重点：BRC20 / RUNES
 
@@ -115,9 +129,9 @@ class MyStrategy:
 - 这正是框架价值：**不美化、不编造**，跑不赢就标未过，OOS 不足就拒放行。
 - **新增第四关 g4_excess（主放行门槛）**：策略须相对买入持有为正才可通过（详见 §10）。BTC 样本内 −7.45% / 买入持有 +11.90% → 超额为负 → 已被正确判负，不再被「扛得住」误导。
 
-## 8. 交叉验证结论（2026-11-01 跑，关键修正）
+## 8. 历史交叉验证快照（2026-11-01；不是当前运行结果）
 
-引入 `BRC20_RSI_MR`（高频）做跨资产/跨周期/跨 vintage 验证后，**推翻了单看样本内的"BRC20 暴利"幻觉**：
+以下数值仅是 2026-11-01 的历史研究快照。当前 `run_research.py` 已改为每次运行动态计算交叉验证，不应将本节数字当作 2026-11-02 的最新结果。
 
 - **粒度反转（最关键）**：ORDI 的 BRC20_RSI_MR 样本内 **4h +186.76% 但 1d −57.76%**；1000SATS **4h −32.59% 但 1d +17.68%**。两代币在 4h/1d 上结论**方向相反** → 盈利高度依赖时间粒度，是典型的**粒度/参数过拟合**信号，非可迁移 edge。
 - **跨 vintage 不一致**：ORDI 三窗 OOS 净收益 +75.6% / +45.4% / −14.7%（2正1负）；SATS 三窗 +5.5% / +34.5% / −31.9%（2正1负），正负交替，稳健性不成立。
@@ -158,3 +172,54 @@ class MyStrategy:
 | ③ 超额收益升为主放行指标 | ✅ 完成 | 新增 g4_excess（§10），BTC 等跑输大盘已被正确判负 |
 
 > 免责声明：示例/教学，非投资建议。据此实盘盈亏自负。
+
+
+## 12. 交易指挥中心 V1（模拟账户）
+
+- 新增 dashboard/trading.html，保留原研究仪表盘，并从首页进入交易工作台。
+- 实时行情：Binance 公共 REST + WebSocket，覆盖 BTC、ETH、ORDI、1000SATS 现货。
+- 盘口与逐笔：展示公开盘口和实时成交流；市价模拟单按可见盘口深度逐档计算成交均价，盘口深度不足时拒绝模拟成交。
+- 模拟账户：初始 10,000 USDT；本地浏览器持久化；仅现货多头，不支持杠杆、裸卖空、钱包连接或真实下单。
+- 限价单：只在公开盘口跨价且可见深度足够时模拟成交；不模拟真实交易所队列优先级。
+- 风险闸门：单笔不超过净值 10%、总敞口不超过 40%、单日亏损 3% 熔断、账户回撤 10% 熔断；卖出操作保留以便降低风险。
+- 策略放行：直接读取 dashboard/data/research.json；当前没有通过门禁的策略时明确显示「未放行」，不将回测收益包装成实盘能力。
+- 3D 市场宇宙：Three.js 节点仅用于资产态势展示，不代表真实资金流或相关性。
+- 本地预览：cd dashboard && python -m http.server 8765，然后访问 http://localhost:8765/trading.html。
+- 质量检查：npm test；python -m unittest discover -s tests -p "test_*.py"。
+
+当前模拟账户数据仅保存在打开终端的浏览器 localStorage，清除浏览器数据会清空账户；跨设备同步和服务端账户账本属于下一阶段。此版本不连接真实交易所账户，不接受交易 API Key。
+
+
+## 13. AI Provider Center 与六角色研究流程
+
+- `dashboard/trading.html` 首屏顶部新增独立可见的 AI Provider Center（锚点 `#aiProviderCenter`），从首页也可直接点击“AI API 配置”；包括 MiniMax M3 / Qwen Model Studio API 输入、连接测试、普通 AI 分析、六 Agent 研究流程和独立模拟往返自检。
+- `functions/api/ai/chat.js` 是 Cloudflare Pages 同站 API；`functions/_lib/ai-core.mjs` 负责校验和转发。
+- API Key 仅在当前页面内存中保留，按用户点击发起请求时经 HTTPS 发送到同站函数，再转发至所选模型服务商；应用不写入 localStorage、Cookie、Git 或日志。刷新页面后需要重新输入。
+- MiniMax：模型 `MiniMax-M3`；中国站 `https://api.minimaxi.com/v1`、国际站 `https://api.minimax.io/v1`，API Key 与区域必须匹配。
+- Qwen：使用 Model Studio 通用 API Key（`sk-`）和与密钥同区域的 Workspace ID；默认 `qwen3-coder-next`，同时支持 `qwen3-coder-plus`、`qwen3.8-max`、`qwen3.7-plus`、`qwen3.6-plus`。
+- **不要把 Qwen Coding Plan 的 `sk-sp-` 密钥填入网页**。该套餐仅供 Qwen Code 等交互式编程工具使用，不用于本应用后端。
+- 六角色顺序：SPOTTER → PRIOR → EDGE → KELLY → TAKER → CLOSER。SPOTTER/PRIOR/EDGE/CLOSER 由模型分别调用；KELLY 的计算函数采用 95% Wilson 胜率下界 + 1/4 Kelly + 10% 上限；但 Agent API 目前不接受客户端提交的回测统计，因服务端可信研究账本尚未建成，故当前 KELLY 恒为 0、TAKER 恒阻断。TAKER 永远不会自动创建模拟单或真实订单。
+- AI 只生成研究意见，不决定策略是否放行，不生成真实交易指令。研究门禁仍由程序计算。
+- 收益研究与模拟验收路线见 `盈利研究计划.md`。
+
+### 质量测试
+
+```bash
+npm test
+npm run test:e2e
+python -m unittest discover -s tests -p "test_*.py"
+```
+
+浏览器 E2E 使用 Playwright + 模拟 Binance 公共行情响应，验证页面行情加载、盘口驱动的模拟成交、单笔风险拒单、MiniMax/Qwen 输入界面和密钥不落地。该测试不替代用户输入真实 API Key 后的供应商连通性测试。
+
+## 14. 六层 AI Quant Trading OS 架构与当前审计
+
+- 架构审计：`docs/AI_QUANT_TRADING_OS_ARCHITECTURE.md`
+- JEV React 19 / Vite / Three.js 集成合同：`docs/JEV_TRADING_DESK_INTEGRATION.md`
+- 当前严格 Walk-forward：每个 90 天 fold 只用验证开始前的数据选择参数，再用独立策略实例验证；训练期无正 edge 时不强行选参。
+- 回测风险质量新增：胜率 95% Wilson 区间、Expectancy、Profit Factor、每笔 Sharpe/Sortino（不年化）、交易收益 bootstrap Monte Carlo（1,000 次）和额外每边 0/5/10/20/50 bps 滑点敏感性；Monte Carlo 不模拟盘口路径/序列相关，不能当作收益预测。
+- CRC20/LEAF：新增 `fetch_crc20_status`、`fetch_crc20_stats`、`fetch_crc20_history`、`fetch_crc20_market_snapshot`；marketplace sale 与 AXBT/LEAF pool swap 分开，不把它们合成一个虚假的 latest_trade。
+- CRC20 公开 API 没有可验证的完整订单簿，因此 best bid/ask、6h VWAP、统一 latest_trade 保持 unknown；需要和 `https://crc.garden/activity`、Bitcoin 区块/交易证据交叉核验。
+- 3D 市场宇宙：新增 Binance 90 天 4h 收益相关性连线；明确标记为价格相关性，不伪装成资金流。真实资金流边仍待接入链上/DEX 成交证据。
+- 当前分支仍是 Night Researcher 预览原型；JEV 本地 React 前端、Provider Center DPAPI、4779 后端和六个 React 页面尚未真正集成。必须在可访问的 JEV 源码上完成，不宣称已完成。
+

@@ -19,6 +19,8 @@ import json
 import time
 import urllib.request
 import urllib.error
+from decimal import Decimal, InvalidOperation
+from urllib.parse import urlencode, quote
 
 TIMEOUT = 15
 _UA = {"User-Agent": "Mozilla/5.0 (night-researcher)"}
@@ -149,3 +151,193 @@ if __name__ == "__main__":
     print("funding :", fetch_funding_rate("BTCUSDT"))
     print("liq     :", fetch_liquidations("BTCUSDT"))
     print("runes   :", fetch_runes_top(20))
+
+
+# ---------------------------------------------------------------------------
+# 4. CRC-20 / LEAF（Bitcoin L1 token ledger）
+# ---------------------------------------------------------------------------
+CRC20_BASE = "https://crc20.org/api/v1"
+
+
+def _decimal_string(value):
+    """安全解析协议中的十进制字符串；金额不使用 binary float。"""
+    if value is None:
+        return None
+    try:
+        number = Decimal(str(value))
+        if not number.is_finite():
+            return None
+        return number
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _sat_per_leaf_to_usd(unit_price_sat, btc_usdt):
+    """把 sat/LEAF 按当前 BTC/USDT 参考价换算；结果是派生估值，不是交易所成交价。"""
+    sats = _decimal_string(unit_price_sat)
+    btc_price = _decimal_string(btc_usdt)
+    if sats is None or btc_price is None or btc_price <= 0:
+        return None
+    return format((sats * btc_price / Decimal(100000000)).normalize(), "f")
+
+
+def fetch_crc20_status():
+    """读取 CRC-20 indexer 状态；synced=false 时不得把 404 当成链上不存在。"""
+    try:
+        data = _get_json(f"{CRC20_BASE}/status")
+        return {
+            "ok": isinstance(data, dict),
+            "source": "crc20.org/api/v1/status",
+            "data": data if isinstance(data, dict) else None,
+            "ts": int(time.time() * 1000),
+        }
+    except Exception as exc:
+        return {"ok": False, "source": "crc20.org/api/v1/status", "reason": str(exc)}
+
+
+def fetch_crc20_stats(tick="LEAF", api_key=None):
+    """读取 LEAF/AXBT 统计；原始 token amounts 保留字符串，调用方应使用 Decimal/BigInt。"""
+    tick = str(tick or "LEAF").upper()
+    if tick not in ("LEAF", "AXBT"):
+        return {"ok": False, "reason": "tick must be LEAF or AXBT"}
+    try:
+        headers = {"X-API-Key": api_key} if api_key else None
+        data = _get_json(f"{CRC20_BASE}/stats/{tick}", extra_headers=headers)
+        return {
+            "ok": isinstance(data, dict),
+            "source": f"crc20.org/api/v1/stats/{tick}",
+            "data": data if isinstance(data, dict) else None,
+            "ts": int(time.time() * 1000),
+        }
+    except Exception as exc:
+        return {"ok": False, "source": f"crc20.org/api/v1/stats/{tick}", "reason": str(exc)}
+
+
+def fetch_crc20_history(limit=100, cursor=None, tick="LEAF", api_key=None):
+    """读取全局已确认操作；cursor 必须原样传回，建议按 30–60 秒节奏轮询第一页。"""
+    tick = str(tick or "LEAF").upper()
+    if tick not in ("LEAF", "AXBT", "ALL"):
+        return {"ok": False, "reason": "tick must be LEAF, AXBT or all"}
+    try:
+        limit = max(1, min(100, int(limit)))
+        params = {"limit": limit, "tick": tick.lower() if tick == "ALL" else tick}
+        if cursor:
+            params["cursor"] = str(cursor)
+        headers = {"X-API-Key": api_key} if api_key else None
+        data = _get_json(f"{CRC20_BASE}/history?{urlencode(params)}", extra_headers=headers)
+        return {
+            "ok": isinstance(data, dict),
+            "source": "crc20.org/api/v1/history",
+            "data": data if isinstance(data, dict) else None,
+            "ts": int(time.time() * 1000),
+        }
+    except Exception as exc:
+        return {"ok": False, "source": "crc20.org/api/v1/history", "reason": str(exc)}
+
+
+def fetch_crc20_transaction(txid, tick="LEAF", api_key=None):
+    """读取一笔已确认交易的 CRC-20 解析；404/503 由调用方区分处理。"""
+    txid = str(txid or "").lower()
+    if len(txid) != 64 or any(ch not in "0123456789abcdef" for ch in txid):
+        return {"ok": False, "reason": "txid must be 64 hexadecimal characters"}
+    tick = str(tick or "LEAF").upper()
+    if tick not in ("LEAF", "AXBT", "ALL"):
+        return {"ok": False, "reason": "tick must be LEAF, AXBT or all"}
+    try:
+        headers = {"X-API-Key": api_key} if api_key else None
+        suffix = f"?tick={tick.lower() if tick == 'ALL' else tick}"
+        data = _get_json(f"{CRC20_BASE}/transactions/{quote(txid)}{suffix}", extra_headers=headers)
+        return {
+            "ok": isinstance(data, dict),
+            "source": "crc20.org/api/v1/transactions",
+            "data": data if isinstance(data, dict) else None,
+            "ts": int(time.time() * 1000),
+        }
+    except Exception as exc:
+        return {"ok": False, "source": "crc20.org/api/v1/transactions", "reason": str(exc)}
+
+
+def fetch_crc20_market_snapshot(btc_usdt=None, history_limit=100):
+    """
+    汇总 LEAF 的 indexer status、token stats、global history。
+    严格区分 marketplace sale 与 AXBT/LEAF pool swap；不把两者混成单一 latest_trade。
+    CRC-20 API 没有公开 best bid/ask order book，因此 bid/ask 与 6h VWAP 保持 unknown。
+    """
+    status = fetch_crc20_status()
+    stats = fetch_crc20_stats("LEAF")
+    history = fetch_crc20_history(limit=history_limit, tick="LEAF")
+    stat_data = stats.get("data") or {}
+    token = stat_data.get("token") or {}
+    market = stat_data.get("market") or {}
+    pool = stat_data.get("pool") or {}
+    pool_last = pool.get("last") or {}
+
+    market_sale_sat = market.get("last_unit_price_sat")
+    leaf_atoms = _decimal_string(pool_last.get("leaf"))
+    axbt_atoms = _decimal_string(pool_last.get("axbt"))
+    pool_swap_sat = None
+    if leaf_atoms is not None and leaf_atoms > 0 and axbt_atoms is not None and axbt_atoms >= 0:
+        # LEAF atoms = 1e-8 LEAF; AXBT atoms = satoshis.
+        pool_swap_sat = format((axbt_atoms * Decimal(100000000) / leaf_atoms).normalize(), "f")
+
+    status_data = status.get("data") or {}
+    synced = status_data.get("synced") is True
+    status_height = status_data.get("height")
+    stats_height = token.get("height")
+    height_consistent = (
+        isinstance(status_height, int) and isinstance(stats_height, int)
+        and stats_height == status_height
+    )
+
+    return {
+        "ok": bool(status.get("ok") and stats.get("ok") and history.get("ok")),
+        "source": "crc20.org/api/v1",
+        "receivedAt": int(time.time() * 1000),
+        "indexer": {
+            "synced": synced,
+            "height": status_height,
+            "statsHeight": stats_height,
+            "heightConsistent": height_consistent,
+        },
+        "token": {
+            "tick": "LEAF",
+            "decimals": 8,
+            "supplyAtoms": token.get("supply"),
+            "holders": token.get("holders"),
+        },
+        "marketplace": {
+            "lastSaleUnitPriceSat": str(market_sale_sat) if market_sale_sat is not None else None,
+            "lastSaleUsdDerived": _sat_per_leaf_to_usd(market_sale_sat, btc_usdt),
+            "lastSale": market.get("last"),
+            "sales": market.get("sales"),
+            "volumeSat": market.get("volume_sat"),
+        },
+        "pool": {
+            "swaps": pool.get("swaps"),
+            "last": pool_last or None,
+            "lastSwapUnitPriceSatDerived": pool_swap_sat,
+        },
+        "priceQuality": {
+            "latestTradeUsd": None,
+            "recentVwap6hUsd": None,
+            "bestBidUsd": None,
+            "bestAskUsd": None,
+            "note": "API 当前提供 marketplace last sale 与 pool last swap 的分离字段；没有可公开读取的完整订单簿。未从历史价格/Floor 推算 bid/ask 或 6h VWAP。",
+        },
+        "history": history.get("data"),
+        "raw": {
+            "status": status.get("data"),
+            "stats": stat_data,
+        },
+        "trust": {
+            "indexerSynced": synced,
+            "statsHeightConsistent": height_consistent,
+            "confirmedLedgerOnly": True,
+            "btcUsdtReference": str(btc_usdt) if btc_usdt is not None else None,
+        },
+        "errors": {
+            "status": status.get("reason"),
+            "stats": stats.get("reason"),
+            "history": history.get("reason"),
+        },
+    }

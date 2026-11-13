@@ -1,0 +1,62 @@
+name: Quality Gates
+on:
+  pull_request:
+  push:
+    branches: ["main", "feat/**"]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Python syntax
+        run: python -m compileall -q backtest_engine.py strategies.py run_research.py brc20_runes_monitor.py connectors_extra.py
+      - name: Backtest execution tests
+        run: python -m unittest discover -s tests -p "test_*.py"
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install browser test dependencies
+        run: npm install --no-audit --no-fund
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Paper trading and AI proxy tests
+        run: npm test
+      - name: Browser end-to-end tests
+        run: npm run test:e2e
+      - name: Cloudflare Pages Preview smoke test
+        if: github.event_name == 'pull_request'
+        run: |
+          PREVIEW_URL="https://feat-paper-trading-command-c.night-researcher-dash.pages.dev"
+          for attempt in $(seq 1 18); do
+            html_code="$(curl -L -sS --max-time 15 -o /tmp/nr-preview.html -w '%{http_code}' "$PREVIEW_URL/trading.html" || true)"
+            settings_code="$(curl -L -sS --max-time 15 -o /tmp/nr-ai-settings.html -w '%{http_code}' "$PREVIEW_URL/ai-settings.html" || true)"
+            api_code="$(curl -L -sS --max-time 15 -o /tmp/nr-ai-smoke.json -w '%{http_code}' -X POST "$PREVIEW_URL/api/ai/chat" -H 'Content-Type: application/json' --data '{"provider":"invalid"}' || true)"
+            paper_code="$(curl -L -sS --max-time 15 -o /tmp/nr-paper-smoke.json -w '%{http_code}' -X POST "$PREVIEW_URL/api/paper/session" -H 'Content-Type: application/json' --data '{}' || true)"
+            paper_ready=false
+            if [ "$paper_code" = "200" ] && grep -q '"ok":true' /tmp/nr-paper-smoke.json; then paper_ready=true; fi
+            if [ "$paper_code" = "503" ] && grep -Eq 'PAPER_LEDGER_NOT_CONFIGURED|PAPER_LEDGER_SECRET_MISSING' /tmp/nr-paper-smoke.json; then paper_ready=true; fi
+            if [ "$html_code" = "200" ] && [ "$settings_code" = "200" ] && grep -q "AI 模型与 API 设置" /tmp/nr-ai-settings.html && [ "$api_code" = "400" ] && grep -q "不支持的 AI 服务商" /tmp/nr-ai-smoke.json && [ "$paper_ready" = "true" ]; then
+              echo "Cloudflare Preview HTML, AI Function and paper ledger route are reachable."
+              echo "Paper ledger status: HTTP $paper_code"
+              cat /tmp/nr-ai-smoke.json
+              cat /tmp/nr-paper-smoke.json
+              exit 0
+            fi
+            echo "Preview not ready yet (attempt $attempt): trading=$html_code ai_settings=$settings_code ai_api=$api_code paper_ledger=$paper_code"
+            sleep 5
+          done
+          echo "Cloudflare Pages Preview did not expose the trading page, dedicated AI settings page, and AI function."
+          cat /tmp/nr-ai-smoke.json || true
+          cat /tmp/nr-paper-smoke.json || true
+          exit 1

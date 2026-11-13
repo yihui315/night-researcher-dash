@@ -1,0 +1,13 @@
+{
+  "name": "night-researcher-dash",
+  "private": true,
+  "version": "1.1.0",
+  "description": "Night Researcher quantitative research and paper trading desk",
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}
