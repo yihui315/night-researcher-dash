@@ -20,11 +20,11 @@ import json
 from backtest_engine import (
     fetch_klines, fetch_fng, fetch_stablecoin_supply, Context,
     simulate, evaluate_gates, build_card, build_morning_report, bj_time,
-    buy_and_hold_return, rolling_oos, grid_search, summarize_grid,
+    buy_and_hold_return, walk_forward_oos, grid_search, summarize_grid,
 )
 from strategies import STRATEGIES
 from brc20_runes_monitor import analyze_brc20_runes
-from connectors_extra import fetch_funding_rate, fetch_liquidations, fetch_runes_top
+from connectors_extra import fetch_funding_rate, fetch_liquidations, fetch_runes_top, fetch_crc20_market_snapshot
 
 WORKDIR = os.path.dirname(os.path.abspath(__file__))
 OUTDIR = os.path.join(WORKDIR, "output")
@@ -182,7 +182,7 @@ def main():
 
     # ============ §七 永续/RUNES 补充数据（可达环境可用） ============
     print("[*] 调用 RUNES/资金费率/爆仓 连接器 ...")
-    supp_md, supp_struct = _build_supplementary()
+    supp_md, supp_struct = _build_supplementary(now_ms)
 
     # ============ 组装研究结论 JSON（单一数据源，供前端实时刷新） ============
     eco = mon.get("facts", {}) if mon.get("ok") else {}
@@ -240,25 +240,55 @@ def _build_cross_validation(brc20_ctx, now_ms, start_ms, oos_ms, fng_pts):
     L = ["\n## 六、跨资产 / 周期交叉验证（压制单资产过拟合嫌疑）\n"]
     dayms = 86400_000
     start_d = bj_time(start_ms)
-    cv = {"grainFlip": [], "vintage": []}
+    cv = {"grainFlip": [], "vintage": [], "walkForward": []}
+    param_grids = {
+        "FNG_EMA_MR": {
+            "fng_extreme": [20, 25, 30],
+            "rsi_entry": [30, 35, 40],
+            "max_hold": [10, 20],
+        },
+        "BRC20_RSI_MR": {
+            "oversold": [22, 26, 30, 35, 40],
+            "overbought": [60, 65, 70, 75, 80],
+        },
+    }
 
     for label, ctx in brc20_ctx.items():
-        L.append(f"\n### 6.1 {label} · 滚动样本外（walk-forward，每 fold 90 天，不重叠）\n")
-        L.append(f"- 回测窗口：{start_d} 起；共 {FOLDS} 个样本外 vintage（自今向前推）。\n")
-        L.append("| 策略 | Vintage(结束日) | 交易数 | OOS净收益 | 胜率 |")
-        L.append("|---|---|---|---|---|")
+        L.append(f"\n### 6.1 {label} · 严格 Walk-forward（每个 fold 先训练，再独立验证 90 天）\n")
+        L.append(f"- 回测窗口：{start_d} 起；共 {FOLDS} 个不重叠验证窗口。每个 fold 只使用验证窗口之前的数据选择参数。\n")
+        L.append("| 策略 | 训练交易数 | 训练期净收益 | 验证交易数 | OOS 净收益 | 胜率 | 验证回撤 | 状态 |")
+        L.append("|---|---:|---:|---:|---:|---:|---:|---|")
         vintage_by_strat = {}
+        walkforward_by_strat = {}
         for key, name in [("FNG_EMA_MR", "FNG_EMA_MR(低频)"), ("BRC20_RSI_MR", "BRC20_RSI_MR(高频)")]:
-            folds = rolling_oos(STRATEGIES[key], {}, ctx, folds=FOLDS, oos_days=OOS_DAYS)
+            folds = walk_forward_oos(
+                STRATEGIES[key],
+                ctx,
+                param_grids[key],
+                folds=FOLDS,
+                oos_days=OOS_DAYS,
+                min_train_trades=10,
+            )
             vintage_by_strat[key] = folds
+            walkforward_by_strat[key] = folds
             for fd in folds:
-                end_d = bj_time(fd["end_ms"])
-                wr = "-" if fd["win_rate"] is None else f"{fd['win_rate']*100:.1f}%"
-                L.append(f"| {name} | {end_d} | {fd['n']} | {_fmt_pct(fd['net'])} | {wr} |")
+                train_net = "—" if fd["train_net"] is None else _fmt_pct(fd["train_net"])
+                oos_net = _fmt_pct(fd["net"])
+                wr = "—" if fd["win_rate"] is None else f"{fd['win_rate']*100:.1f}%"
+                mdd = "—" if fd["max_drawdown"] is None else f"{fd['max_drawdown']*100:.1f}%"
+                status = "训练期无正 edge" if fd["status"] == "NO_TRAIN_EDGE" else ("验证无交易" if fd["status"] == "NO_OOS_TRADES" else "已验证")
+                L.append(f"| {name} | {fd['train_n']} | {train_net} | {fd['n']} | {oos_net} | {wr} | {mdd} | {status} |")
         L.append("")
-        L.append(f"- **解读**：FNG_EMA_MR 各 vintage 仅 1 笔交易 → **OOS 饥饿（验证不可信）**；"
-                 f"BRC20_RSI_MR 因频率更高，各 vintage 交易数显著增多，可初步判断策略稳定性。"
-                 f"若多 vintage 净收益方向一致（同正/同负），则过拟合嫌疑下降；若正负交替，则仍为噪音。\n")
+        for key, name in [("FNG_EMA_MR", "FNG_EMA_MR"), ("BRC20_RSI_MR", "BRC20_RSI_MR")]:
+            rows = walkforward_by_strat[key]
+            valid = [fd for fd in rows if fd["status"] == "VALIDATED" and fd["net"] is not None]
+            positive = sum(1 for fd in valid if fd["net"] > 0)
+            L.append(f"- **{name}**：{len(valid)}/{len(rows)} 个 fold 产生独立 OOS 成交；其中 {positive} 个 fold 净收益为正。")
+        L.append("- **解释边界**：这是训练窗口内参数选择 + 后续独立窗口验证；若训练期无正 edge，该 fold 不会强行选参数。不同 fold 的策略参数可能不同，结果不能与固定参数回测混为一谈。\n")
+        cv["walkForward"].append({
+            "sym": label.split("(")[0],
+            "strategies": walkforward_by_strat,
+        })
 
         # 多周期：4h vs 1d（仅 BRC20_RSI_MR）
         L.append(f"### 6.2 {label} · 多周期对比（BRC20_RSI_MR，样本内净收益）\n")
@@ -300,17 +330,31 @@ def _build_cross_validation(brc20_ctx, now_ms, start_ms, oos_ms, fng_pts):
     L.append("- BRC20 两标的同属比特币 L1 铭文生态、相关性高；若两标的 OOS 表现同向，可互为交叉验证；"
              "若严重分化，提示策略对单一代币路径过拟合。详见上方各 vintage 表。\n")
 
-    L.append("### 6.4 交叉验证综合结论（事实，非推断）\n")
-    L.append("- **粒度反转（最关键）**：ORDI 的 BRC20_RSI_MR 样本内 **4h +186.76% 但 1d −57.76%**；"
-             "1000SATS 同样 **4h −32.59% 但 1d +17.68%**。两代币在 4h 与 1d 上结论**方向相反** → "
-             "该策略的「盈利」高度依赖所选时间粒度，是典型的**粒度/参数过拟合**信号，非可迁移 edge。\n")
-    L.append("- **跨 vintage 不一致**：ORDI 三窗 OOS 净收益 +75.6% / +45.4% / **−14.7%**（2 正 1 负）；"
-             "SATS 三窗 +5.5% / +34.5% / **−31.9%**（2 正 1 负）。正负交替，稳健性不成立。\n")
-    L.append("- **结论**：BRC20 上「看似惊艳」的样本内收益（ORDI +175%~+187%、SATS 各有盈亏）"
-             "**未通过跨资产/跨周期/跨 vintage 交叉验证**。框架应维持「不予放行」。"
-             "这正印证原 Prompt『反过拟合』关卡的价值——**单看样本内会被严重误导**。\n")
-    cv["conclusion"] = ("BRC20「看似惊艳」的样本内收益（ORDI +175%~+187%、SATS 各有盈亏）未通过跨资产/跨周期/"
-                        "跨 vintage 交叉验证 → 框架维持「不予放行」。单看样本内会被严重误导。")
+    L.append("### 6.4 交叉验证综合结论（由本次数据动态计算）\n")
+    grain_flip = [
+        row for row in cv["grainFlip"]
+        if row["h4"] != 0 and row["d1"] != 0 and ((row["h4"] > 0) != (row["d1"] > 0))
+    ]
+    wf_folds = [
+        fold
+        for item in cv["walkForward"]
+        for strategy_folds in item["strategies"].values()
+        for fold in strategy_folds
+    ]
+    wf_valid = [fold for fold in wf_folds if fold["status"] == "VALIDATED" and fold["net"] is not None]
+    wf_positive = sum(1 for fold in wf_valid if fold["net"] > 0)
+    wf_negative = sum(1 for fold in wf_valid if fold["net"] <= 0)
+    wf_no_train = sum(1 for fold in wf_folds if fold["status"] == "NO_TRAIN_EDGE")
+    L.append(f"- **多周期方向反转**：{len(grain_flip)}/{len(cv['grainFlip'])} 个资产在 4h 与 1d 样本内方向相反。")
+    L.append(f"- **严格 Walk-forward**：{len(wf_valid)} 个 fold 有独立 OOS 成交；{wf_positive} 个为正、{wf_negative} 个非正；{wf_no_train} 个 fold 因训练期没有正 edge 而停止选参。")
+    if not wf_valid:
+        conclusion = "当前没有足够的独立 Walk-forward OOS 成交，策略维持未放行。"
+    elif wf_negative > 0 or grain_flip:
+        conclusion = "Walk-forward 或多周期验证仍存在负收益/方向反转，策略维持未放行。"
+    else:
+        conclusion = "本轮 Walk-forward 和多周期检查未发现负向 fold；仍需结合样本量、成本、Monte Carlo 与人工审查，不能自动晋级。"
+    L.append("- **结论**：" + conclusion + "\n")
+    cv["conclusion"] = conclusion
     return "\n".join(L), cv
 
 
@@ -475,12 +519,21 @@ def _norm_runes(runes):
     return base
 
 
-def _build_supplementary():
+def _build_supplementary(now_ms=None):
     """RUNES / 资金费率 / 爆仓 连接器结果（配 key + 可达网络即真用；本环境优雅降级为未知）。
     返回 (markdown, struct)：struct 供前端 JSON 渲染，且对无 key 环境保持诚实的「未知」。"""
     fr = fetch_funding_rate("BTCUSDT")
     liq = fetch_liquidations("BTCUSDT")
     runes = fetch_runes_top(20)
+    now_ms = int(now_ms or time.time() * 1000)
+    btc_price = None
+    try:
+        btc_bars = fetch_klines("BTCUSDT", "1m", now_ms - 3600_000, now_ms)
+        if btc_bars:
+            btc_price = str(btc_bars[-1]["c"])
+    except Exception:
+        btc_price = None
+    crc20 = fetch_crc20_market_snapshot(btc_usdt=btc_price)
 
     L = ["\n## 七、永续 / RUNES 补充数据（配 key + 可达网络自动启用）\n"]
     L.append("> 以下接口在**可访问网络**或配置对应 **API key** 后自动取数；本环境（仅放行 Binance 镜像 / "
@@ -524,7 +577,28 @@ def _build_supplementary():
         L.append("  - `UNISAT_API_KEY=xxx` → UniSat `/v3/market/runes/tokens`")
         L.append("  - `DUNE_API_KEY=xxx` + `DUNE_RUNES_QUERY_ID=yyy` → Dune 查询")
 
-    L.append("\n### 7.4 研究局限与已落地项（诚实标注）\n")
+    L.append("\n### 7.4 CRC-20 / LEAF（Bitcoin L1 ledger）")
+    if crc20.get("ok"):
+        trust = crc20.get("trust") or {}
+        token = crc20.get("token") or {}
+        market = crc20.get("marketplace") or {}
+        pool = crc20.get("pool") or {}
+        idx = crc20.get("indexer") or {}
+        L.append("- Indexer：synced={}；height={}；statsHeight={}".format(trust.get("indexerSynced"), idx.get("height"), idx.get("statsHeight")))
+        L.append("- LEAF supply（atoms，8 decimals）：{}；holders：{}".format(token.get("supplyAtoms", "unknown"), token.get("holders", "unknown")))
+        L.append("- 最近 marketplace sale：{} sat/LEAF；BTC 参考价换算 USD：{}".format(market.get("lastSaleUnitPriceSat") or "unknown", market.get("lastSaleUsdDerived") or "unknown"))
+        L.append("- 最近 AXBT/LEAF pool swap：{} sat/LEAF（由 pool.last 原子数量换算）".format(pool.get("lastSwapUnitPriceSatDerived") or "unknown"))
+        L.append("- latest confirmed trade、6h VWAP、best bid/ask：unknown（公开 API 未提供可验证的完整实时订单簿；不以 floor/历史快照代替）。")
+        if not trust.get("indexerSynced"):
+            L.append("- **信任状态：暂不放行**。Indexer 未报告 synced=true；不能把缺失/404 当成无交易。")
+        else:
+            L.append("- Indexer 报告 synced=true；仍需与 crc.garden/activity 及 Bitcoin 区块/交易证据交叉核对。")
+        L.append("- 交叉核对入口：https://crc.garden/activity；API 原始字段已写入 research.json 的 supplementary.crc20。")
+    else:
+        L.append("- **未知**：{}".format(crc20.get("errors")))
+        L.append("- API：https://crc20.org/api/v1/status、/stats/LEAF、/history；公共只读 API，建议 30–60 秒节奏轮询。")
+
+    L.append("\n### 7.5 研究局限与已落地项（诚实标注）\n")
     L.append("1. **BRC20 样本内高收益「非 Beta、但过拟合」已证实**：§六 网格交叉验证显示，ORDI/SATS 在"
              "`BRC20_RSI_MR` 上最佳参数样本内亮眼、但相邻参数即翻负、OOS 不稳 → **过拟合嫌疑高**，框架维持「不予放行」。")
     L.append("2. **超额收益已升为主放行门槛（g4）**：策略须相对买入持有为正才可通过；BTC/ETH 上原策略跑输大盘，"
@@ -538,6 +612,7 @@ def _build_supplementary():
         "fundingRate": _norm_fr(fr),
         "liquidations": _norm_liq(liq),
         "runes": _norm_runes(runes),
+        "crc20": crc20,
     }
     return "\n".join(L), supp_struct
 

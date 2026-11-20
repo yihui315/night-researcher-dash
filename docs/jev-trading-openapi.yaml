@@ -1,0 +1,297 @@
+openapi: 3.1.0
+info:
+  title: JEV Trading Desk API Contract
+  version: 1.0.0
+  description: >
+    Planned contract for mounting Night Researcher as a JEV Command Center feature.
+    This file is a contract only; these /api/v1/trading routes are not yet implemented.
+servers:
+  - url: http://127.0.0.1:4779
+    description: Local JEV backend integration target
+tags:
+  - name: Health
+  - name: Market
+  - name: Research
+  - name: Strategies
+  - name: Paper
+paths:
+  /api/v1/trading/health:
+    get:
+      tags: [Health]
+      operationId: getTradingHealth
+      responses:
+        "200":
+          description: Service health and safety mode
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  mode: { type: string, enum: [research, paper] }
+                  liveTradingEnabled: { type: boolean, const: false }
+                  services:
+                    type: object
+                    additionalProperties: { type: string, enum: [ok, degraded, unavailable] }
+  /api/v1/trading/market/snapshot:
+    get:
+      tags: [Market]
+      operationId: getMarketSnapshot
+      parameters:
+        - in: query
+          name: symbols
+          schema: { type: string, example: BTCUSDT,ETHUSDT,ORDIUSDT,1000SATSUSDT }
+        - in: query
+          name: interval
+          schema: { type: string, enum: [1m, 15m, 1h, 4h, 1d], default: 4h }
+      responses:
+        "200":
+          description: Normalized market snapshot with source timestamps
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketSnapshot"
+  /api/v1/trading/market/orderbook:
+    get:
+      tags: [Market]
+      operationId: getOrderBook
+      parameters:
+        - in: query
+          name: venue
+          required: true
+          schema: { type: string, example: binance-spot }
+        - in: query
+          name: symbol
+          required: true
+          schema: { type: string, example: BTCUSDT }
+      responses:
+        "200":
+          description: Sequenced order book snapshot; stale books must be rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderBook"
+  /api/v1/trading/research/runs:
+    post:
+      tags: [Research]
+      operationId: createAgentResearchRun
+      description: >
+        Start SPOTTER, PRIOR, EDGE, deterministic KELLY, deterministic TAKER proposal,
+        and CLOSER. providerId is resolved server-side by JEV Provider Center;
+        the browser never sends an API key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [providerId, symbols]
+              properties:
+                providerId: { type: string, example: minimax-m3 }
+                modelOverride: { type: string }
+                symbols:
+                  type: array
+                  items: { type: string }
+                snapshotId: { type: string }
+                strategyVersion: { type: string }
+      responses:
+        "202":
+          description: Research run accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runId, status, autoExecution]
+                properties:
+                  runId: { type: string }
+                  status: { type: string, enum: [queued, running] }
+                  autoExecution: { type: boolean, const: false }
+        "400":
+          description: Invalid request
+  /api/v1/trading/research/runs/{runId}:
+    get:
+      tags: [Research]
+      operationId: getAgentResearchRun
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Agent timeline, evidence, usage and risk result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentRun"
+  /api/v1/trading/strategies:
+    get:
+      tags: [Strategies]
+      operationId: listStrategies
+      responses:
+        "200":
+          description: Strategy versions, lifecycle states and validation metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Strategy"
+  /api/v1/trading/paper/account:
+    get:
+      tags: [Paper]
+      operationId: getPaperAccount
+      responses:
+        "200":
+          description: Paper account ledger snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaperAccount"
+  /api/v1/trading/paper/orders:
+    post:
+      tags: [Paper]
+      operationId: createPaperOrder
+      description: >
+        Only called after a human clicks confirm. The server re-reads the latest
+        market book and account state, then executes deterministic risk checks.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, side, type, quantity, confirmationId]
+              properties:
+                symbol: { type: string }
+                side: { type: string, enum: [BUY, SELL] }
+                type: { type: string, enum: [MARKET, LIMIT] }
+                quantity: { type: number, exclusiveMinimum: 0 }
+                limitPrice: { type: number, exclusiveMinimum: 0 }
+                confirmationId: { type: string }
+                researchRunId: { type: string }
+      responses:
+        "201":
+          description: Paper order accepted or filled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaperOrder"
+        "409":
+          description: Risk gate rejected or stale market data
+  /api/v1/trading/paper/orders/{orderId}/cancel:
+    post:
+      tags: [Paper]
+      operationId: cancelPaperOrder
+      parameters:
+        - in: path
+          name: orderId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Paper order cancellation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  status: { type: string, enum: [CANCELED, NOT_FOUND, NOT_OPEN] }
+components:
+  schemas:
+    DataPoint:
+      type: object
+      required: [value, source, eventTime, receivedAt, quality]
+      properties:
+        value: {}
+        source: { type: string }
+        eventTime: { type: string, format: date-time }
+        receivedAt: { type: string, format: date-time }
+        quality: { type: string, enum: [verified, delayed, stale, unknown] }
+    MarketSnapshot:
+      type: object
+      properties:
+        capturedAt: { type: string, format: date-time }
+        symbols:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              latestTrade: { $ref: "#/components/schemas/DataPoint" }
+              bestBid: { $ref: "#/components/schemas/DataPoint" }
+              bestAsk: { $ref: "#/components/schemas/DataPoint" }
+              recentVwap: { $ref: "#/components/schemas/DataPoint" }
+              priceChange24h: { $ref: "#/components/schemas/DataPoint" }
+    OrderBook:
+      type: object
+      required: [venue, symbol, sequence, capturedAt, bids, asks, quality]
+      properties:
+        venue: { type: string }
+        symbol: { type: string }
+        sequence: { type: integer }
+        capturedAt: { type: string, format: date-time }
+        bids:
+          type: array
+          items: { type: array, prefixItems: [{ type: number }, { type: number }], minItems: 2, maxItems: 2 }
+        asks:
+          type: array
+          items: { type: array, prefixItems: [{ type: number }, { type: number }], minItems: 2, maxItems: 2 }
+        quality: { type: string, enum: [verified, stale, sequence_gap, unknown] }
+    AgentRun:
+      type: object
+      properties:
+        runId: { type: string }
+        status: { type: string, enum: [queued, running, completed, failed, cancelled] }
+        roles:
+          type: array
+          items:
+            type: object
+            properties:
+              agent: { type: string, enum: [SPOTTER, PRIOR, EDGE, KELLY, TAKER, CLOSER] }
+              status: { type: string }
+              evidence: { type: array, items: { type: string } }
+              output: { type: object }
+              providerId: { type: string }
+              model: { type: string }
+              usage: { type: object }
+        riskDecision:
+          type: object
+          properties:
+            status: { type: string, enum: [APPROVED, REJECTED, UNKNOWN] }
+            reasons: { type: array, items: { type: string } }
+        autoExecution: { type: boolean, const: false }
+    Strategy:
+      type: object
+      properties:
+        strategyId: { type: string }
+        version: { type: string }
+        lifecycle: { type: string, enum: [candidate, backtest, oos, paper, live_pending, live, suspended, retired] }
+        metrics: { type: object }
+        gate: { type: string, enum: [blocked, passed, manual_review] }
+    PaperAccount:
+      type: object
+      properties:
+        currency: { type: string, const: USDT }
+        equity: { type: number }
+        cash: { type: number }
+        realizedPnl: { type: number }
+        unrealizedPnl: { type: number }
+        maxDrawdown: { type: number }
+        positions: { type: array, items: { type: object } }
+        orders: { type: array, items: { $ref: "#/components/schemas/PaperOrder" } }
+    PaperOrder:
+      type: object
+      properties:
+        orderId: { type: string }
+        symbol: { type: string }
+        side: { type: string, enum: [BUY, SELL] }
+        type: { type: string, enum: [MARKET, LIMIT] }
+        status: { type: string, enum: [NEW, OPEN, PARTIALLY_FILLED, FILLED, REJECTED, CANCELED] }
+        averageFillPrice: { type: number }
+        filledQuantity: { type: number }
+        fee: { type: number }
+        riskDecision: { type: string, enum: [APPROVED, REJECTED] }

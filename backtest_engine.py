@@ -22,6 +22,8 @@ import json
 import re
 import time
 import bisect
+import math
+import random
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone, timedelta
@@ -255,58 +257,111 @@ class Context:
 SIDE_COST = 0.0015  # 单边 0.15% (手续费0.1% + 滑点0.05%)
 
 
-def simulate(strategy, ctx, oos_split_idx):
+def simulate(strategy, ctx, oos_split_idx, start_idx=0, end_idx=None, compute_stress=True):
     """
-    逐根 K 线驱动 strategy.step(i, ctx) → 'LONG'/'SHORT'/'FLAT'/'HOLD'。
-    仅在仓位变化时计单边成本。返回 trades 列表与汇总。
+    事件驱动回测：收盘产生信号，下一根 K 线开盘成交；止损使用当根 OHLC 检查。
+    每次调用克隆策略实例，避免回测/敏感性分析之间发生状态污染。
+    成本仍按单边 SIDE_COST 计入；该模型是 OHLC 级近似，不等同逐笔订单簿回放。
     """
     bars = ctx.bars
     n = len(bars)
+    start_idx = max(0, min(n, int(start_idx or 0)))
+    end_idx = n if end_idx is None else max(start_idx, min(n, int(end_idx)))
+    params = dict(getattr(strategy, "params", {}) or {})
+    runtime = strategy.__class__(**params)
     pos = 0
     entry_price = 0.0
     entry_i = 0
     trades = []
-    equity = [1.0]  # 净值曲线（每笔交易后更新）
-    for i in range(n):
-        action = strategy.step(i, ctx)
-        price = bars[i]["c"]
-        if action == "LONG" and pos <= 0:
-            if pos < 0:  # 先平空
-                ret = (entry_price / price - 1) - 2 * SIDE_COST
-                trades.append(_mk_trade("SHORT", entry_price, price, entry_i, i, ret, ctx, False))
-                equity.append(equity[-1] * (1 + ret))
-            entry_price = price
-            entry_i = i
-            pos = 1
-        elif action == "SHORT" and pos >= 0:
-            if pos > 0:  # 先平多
-                ret = (price / entry_price - 1) - 2 * SIDE_COST
-                trades.append(_mk_trade("LONG", entry_price, price, entry_i, i, ret, ctx, False))
-                equity.append(equity[-1] * (1 + ret))
-            entry_price = price
-            entry_i = i
-            pos = -1
-        elif action == "FLAT" and pos != 0:
-            if pos > 0:
-                ret = (price / entry_price - 1) - 2 * SIDE_COST
-                trades.append(_mk_trade("LONG", entry_price, price, entry_i, i, ret, ctx, False))
-            else:
-                ret = (entry_price / price - 1) - 2 * SIDE_COST
-                trades.append(_mk_trade("SHORT", entry_price, price, entry_i, i, ret, ctx, False))
-            equity.append(equity[-1] * (1 + ret))
-            pos = 0
-            entry_price = 0.0
-    # 强平末尾未平仓
-    if pos != 0:
-        price = bars[-1]["c"]
+    equity_realized = 1.0
+    equity_curve = []
+    pending = None
+
+    def close_position(price, idx, forced=False):
+        nonlocal pos, entry_price, entry_i, equity_realized
+        if pos == 0:
+            return
         if pos > 0:
             ret = (price / entry_price - 1) - 2 * SIDE_COST
-            trades.append(_mk_trade("LONG", entry_price, price, entry_i, n - 1, ret, ctx, True))
+            direction = "LONG"
         else:
             ret = (entry_price / price - 1) - 2 * SIDE_COST
-            trades.append(_mk_trade("SHORT", entry_price, price, entry_i, n - 1, ret, ctx, True))
-        equity.append(equity[-1] * (1 + ret))
-    return _summarize(trades, equity, oos_split_idx, bars)
+            direction = "SHORT"
+        trades.append(_mk_trade(direction, entry_price, price, entry_i, idx, ret, ctx, forced))
+        equity_realized = max(0.0, equity_realized * (1 + ret))
+        pos = 0
+        entry_price = 0.0
+        entry_i = 0
+
+    def open_position(direction, price, idx):
+        nonlocal pos, entry_price, entry_i
+        pos = 1 if direction == "LONG" else -1
+        entry_price = price
+        entry_i = idx
+        runtime.position = direction
+        runtime.entry_price = price
+        runtime.entry_i = idx
+
+    for i in range(start_idx, end_idx):
+        bar = bars[i]
+        # 前一根收盘产生的信号，在本根开盘执行。
+        if pending == "FLAT":
+            close_position(bar["o"], i)
+            runtime.position = "FLAT"
+        elif pending in ("LONG", "SHORT"):
+            wanted = 1 if pending == "LONG" else -1
+            if pos != wanted:
+                if pos != 0:
+                    close_position(bar["o"], i)
+                open_position(pending, bar["o"], i)
+        pending = None
+
+        # 止损优先于收盘信号；跳空时按开盘价，盘中触发按止损价。
+        stopped = False
+        stop_pct = float(getattr(runtime, "stop_pct", 0) or 0)
+        if pos == 1 and stop_pct > 0:
+            stop_price = entry_price * (1 - stop_pct)
+            if bar["o"] <= stop_price:
+                close_position(bar["o"], i)
+                stopped = True
+            elif bar["l"] <= stop_price:
+                close_position(stop_price, i)
+                stopped = True
+        elif pos == -1 and stop_pct > 0:
+            stop_price = entry_price * (1 + stop_pct)
+            if bar["o"] >= stop_price:
+                close_position(bar["o"], i)
+                stopped = True
+            elif bar["h"] >= stop_price:
+                close_position(stop_price, i)
+                stopped = True
+        if stopped:
+            runtime.position = "FLAT"
+
+        # 每根 K 线收盘盯市，未平仓仓位计入浮动回撤。
+        if pos == 0:
+            equity_curve.append(equity_realized)
+        else:
+            mark = bar["c"]
+            gross = (mark / entry_price - 1) if pos > 0 else (entry_price / mark - 1)
+            equity_curve.append(max(0.0, equity_realized * (1 + gross - SIDE_COST)))
+
+        # 使用当前 K 线收盘可见的信息产生下一根 K 线的待执行信号。
+        if not stopped:
+            action = runtime.step(i, ctx)
+            if action in ("LONG", "SHORT", "FLAT"):
+                pending = action
+
+    # 最后一根 K 线没有下一根开盘价；未平仓头寸按最后收盘价强制估值退出。
+    if pos != 0 and end_idx > start_idx:
+        close_position(bars[end_idx - 1]["c"], end_idx - 1, True)
+        equity_curve[-1] = equity_realized
+    if not equity_curve:
+        equity_curve = [1.0]
+
+    result = _summarize(trades, equity_curve, oos_split_idx, bars, compute_stress=compute_stress)
+    result["execution_model"] = "next_bar_open_with_intrabar_ohlc_stops"
+    return result
 
 
 def buy_and_hold_return(bars):
@@ -336,40 +391,96 @@ def _fold_stats(trades):
     return {"n": len(trades), "net": net, "win_rate": wins / len(trades)}
 
 
-def rolling_oos(strategy_cls, params, ctx, folds=3, oos_days=90):
+def walk_forward_oos(strategy_cls, ctx, param_grid, folds=3, oos_days=90, min_train_trades=10):
     """
-    多 vintage 90d 样本外滚动验证（walk-forward 风格）。
+    严格滚动 Walk-forward：
+    1. 每个 fold 的训练集只包含验证窗口开始之前的数据；
+    2. 只在训练集上跑参数网格并选择训练表现最好的组合；
+    3. 用新策略实例，在后续 90 天验证窗口从空仓开始运行；
+    4. 验证上下文在 fold 结束处截断，禁止读取未来数据。
 
-    每个 fold 是一个不重叠的 90 天窗口（自今向前推），统计该窗口内**出场**的交易。
-    因引擎指标在 idx 处仅用 <=idx 的过去数据，对不同时点重算 simulate / 重新切分
-    出场区间均不引入前视偏差，故 rolling 成立。
-
-    返回 list of dict: {fold, start_ms, end_ms, n, net, win_rate}
+    返回每个 fold 的训练样本、所选参数、独立 OOS 交易和验证指标。
     """
     dayms = 86400_000
-    now = ctx.times[-1]
-    strat = strategy_cls(**params)
-    # 用超大 oos_split_idx 使全量交易归入 insample，便于按出场 idx 手动切分 fold
-    summary = simulate(strat, ctx, len(ctx.bars) + 1)
-    trades = summary["trades"]
+    if not ctx.times:
+        return []
+    now = ctx.times[-1] + 1
     results = []
-    for f in range(folds):
-        start_ms = now - (f + 1) * oos_days * dayms
-        end_ms = now - f * oos_days * dayms
+
+    for fold in range(folds):
+        start_ms = now - (fold + 1) * oos_days * dayms
+        end_ms = now - fold * oos_days * dayms
         idx_s = _first_idx_ge(ctx.times, start_ms)
-        idx_e = _first_idx_ge(ctx.times, end_ms) if f > 0 else len(ctx.bars)
-        if idx_s is None or idx_s >= len(ctx.bars) - 5:
+        idx_e = _first_idx_ge(ctx.times, end_ms)
+        if idx_e is None:
+            idx_e = len(ctx.bars)
+        if idx_s is None or idx_s < 250 or idx_e <= idx_s:
             continue
-        fold_t = [t for t in trades if idx_s <= t["exit_i"] < idx_e]
-        st = _fold_stats(fold_t)
+
+        # 训练数据严格截断在验证窗口开始之前。
+        train_bars = ctx.bars[:idx_s]
+        train_end_ms = train_bars[-1]["t"] if train_bars else 0
+        train_fng = [point for point in ctx.fng_pts if point[0] <= train_end_ms]
+        train_ctx = Context(train_bars, train_fng)
+        train_results = grid_search(
+            strategy_cls,
+            train_ctx,
+            param_grid,
+            len(train_ctx.bars) + 1
+        )
+        eligible = [
+            item for item in train_results
+            if item["ins_n"] >= min_train_trades and item["ins_net"] > 0
+        ]
+        if not eligible:
+            results.append({
+                "fold": fold,
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "train_n": max((item["ins_n"] for item in train_results), default=0),
+                "train_net": None,
+                "selected_params": None,
+                "n": 0,
+                "net": None,
+                "win_rate": None,
+                "max_drawdown": None,
+                "status": "NO_TRAIN_EDGE",
+            })
+            continue
+
+        # 选择只依赖训练窗口；验证数据没有参与参数选择。
+        best = max(eligible, key=lambda item: item["ins_net"])
+        validation_bars = ctx.bars[:idx_e]
+        validation_end_ms = validation_bars[-1]["t"] if validation_bars else 0
+        validation_fng = [point for point in ctx.fng_pts if point[0] <= validation_end_ms]
+        validation_ctx = Context(validation_bars, validation_fng)
+
+        validation = simulate(
+            strategy_cls(**best["params"]),
+            validation_ctx,
+            idx_s,
+            start_idx=idx_s,
+            end_idx=idx_e,
+        )
+        fold_trades = [
+            trade for trade in validation["trades"]
+            if idx_s <= trade["entry_i"] < idx_e and idx_s <= trade["exit_i"] < idx_e
+        ]
+        stats = _fold_stats(fold_trades)
         results.append({
-            "fold": f,
+            "fold": fold,
             "start_ms": start_ms,
             "end_ms": end_ms,
-            "n": st["n"],
-            "net": st["net"],
-            "win_rate": st["win_rate"],
+            "train_n": best["ins_n"],
+            "train_net": best["ins_net"],
+            "selected_params": best["params"],
+            "n": stats["n"],
+            "net": stats["net"],
+            "win_rate": stats["win_rate"],
+            "max_drawdown": validation["max_drawdown"],
+            "status": "VALIDATED" if stats["n"] else "NO_OOS_TRADES",
         })
+
     return results
 
 
@@ -391,7 +502,7 @@ def grid_search(strategy_cls, ctx, param_grid, oos_split_idx):
     for combo in product(*param_grid.values()):
         params = dict(zip(keys, combo))
         strat = strategy_cls(**params)
-        s = simulate(strat, ctx, oos_split_idx)
+        s = simulate(strat, ctx, oos_split_idx, compute_stress=False)
         ins = s["insample"]
         oos = s["oos"]
         out.append({
@@ -459,31 +570,104 @@ def _mk_trade(direction, ep, xp, ei, xi, ret, ctx, forced):
         "entry_i": ei,
         "exit_i": xi,
         "ret": ret,
+        "gross_ret": ret + 2 * SIDE_COST,
+        "round_trip_cost": 2 * SIDE_COST,
         "forced": forced,
         "regime": ctx.regime_at(ei),
         "oos": xi >= 0 and False,  # 占位，下面统一标
     }
 
 
-def _summarize(trades, equity, oos_split_idx, bars):
-    # 标注 OOS（按出场 idx 是否 >= 拆分点）
+def _wilson_interval(wins, n, z=1.96):
+    if n <= 0:
+        return None
+    p = wins / n
+    z2 = z * z
+    den = 1 + z2 / n
+    centre = p + z2 / (2 * n)
+    margin = z * math.sqrt((p * (1 - p) / n) + z2 / (4 * n * n))
+    return {"lower": max(0.0, (centre - margin) / den),
+            "upper": min(1.0, (centre + margin) / den),
+            "confidence": 0.95, "method": "Wilson score interval"}
+
+
+def _percentile(values, p):
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = int(round((len(ordered) - 1) * p))
+    return ordered[max(0, min(len(ordered) - 1, index))]
+
+
+def _monte_carlo(trades, simulations=1000, seed=20261102):
+    """按净交易收益 bootstrap 重采样；不是逐笔盘口/价格路径模拟。"""
+    returns = [float(t.get("ret", 0.0)) for t in trades]
+    if not returns:
+        return {"simulations": 0, "method": "trade-return bootstrap", "status": "NO_TRADES"}
+    rng = random.Random(seed)
+    terminal_returns = []
+    max_drawdowns = []
+    n = len(returns)
+    for _ in range(simulations):
+        equity = 1.0
+        peak = 1.0
+        mdd = 0.0
+        for _ in range(n):
+            r = rng.choice(returns)
+            equity *= max(0.0, 1.0 + r)
+            peak = max(peak, equity)
+            if peak > 0:
+                mdd = max(mdd, (peak - equity) / peak)
+        terminal_returns.append(equity - 1.0)
+        max_drawdowns.append(mdd)
+    return {
+        "simulations": simulations,
+        "method": "bootstrap with replacement on net trade returns",
+        "status": "ESTIMATE",
+        "terminal_return_p05": _percentile(terminal_returns, 0.05),
+        "terminal_return_p50": _percentile(terminal_returns, 0.50),
+        "terminal_return_p95": _percentile(terminal_returns, 0.95),
+        "probability_of_loss": sum(1 for value in terminal_returns if value < 0) / simulations,
+        "max_drawdown_p95": _percentile(max_drawdowns, 0.95),
+        "limitation": "does not model serial correlation, changing liquidity, or intratrade price paths",
+    }
+
+
+def _slippage_sensitivity(trades, extra_bps=(0, 5, 10, 20, 50)):
+    """在原有单边成本之外，额外增加每边滑点，观察净收益退化。"""
+    if not trades:
+        return []
+    out = []
+    for bps in extra_bps:
+        equity = 1.0
+        extra_round_trip = 2 * (bps / 10000.0)
+        for trade in trades:
+            gross = float(trade.get("gross_ret", trade.get("ret", 0.0) + 2 * SIDE_COST))
+            net = gross - 2 * SIDE_COST - extra_round_trip
+            equity *= max(0.0, 1.0 + net)
+        out.append({"extra_slippage_bps_per_side": bps, "net_return": equity - 1.0})
+    return out
+
+
+def _summarize(trades, equity, oos_split_idx, bars, compute_stress=True):
     for t in trades:
         t["oos"] = t["exit_i"] >= oos_split_idx
 
-    # —— 超额收益（相对买入持有）：分离 Beta 与择时 skill ——
-    # 全窗口策略净收益 = 净值终值 - 1；买入持有 = 末收/首收 - 1。
     bh = buy_and_hold_return(bars)
     full_net = equity[-1] - 1.0
     excess = (full_net - bh) if bh is not None else None
-
     insample = [t for t in trades if not t["oos"]]
     oos = [t for t in trades if t["oos"]]
 
     def stats(sub):
         if not sub:
-            return {"n": 0, "win": 0, "win_rate": None, "avg_win": None,
-                    "avg_loss": None, "profit_factor": None, "net": None,
-                    "regime": {}}
+            return {
+                "n": 0, "win": 0, "win_rate": None, "win_rate_ci95": None,
+                "avg_win": None, "avg_loss": None, "profit_factor": None,
+                "profit_factor_unbounded": False, "expectancy": None,
+                "payoff_ratio": None, "sharpe_per_trade": None,
+                "sortino_per_trade": None, "net": None, "regime": {},
+            }
         wins = [t["ret"] for t in sub if t["ret"] > 0]
         losses = [t["ret"] for t in sub if t["ret"] <= 0]
         n = len(sub)
@@ -492,31 +676,44 @@ def _summarize(trades, equity, oos_split_idx, bars):
         avg_loss = sum(losses) / len(losses) if losses else 0.0
         sum_w = sum(wins)
         sum_l = -sum(losses)
-        pf = (sum_w / sum_l) if sum_l > 0 else (float("inf") if sum_w > 0 else 0.0)
+        pf_unbounded = sum_l <= 0 and sum_w > 0
+        pf = (sum_w / sum_l) if sum_l > 0 else (None if pf_unbounded else 0.0)
         net = 1.0
         for t in sub:
-            net *= (1 + t["ret"])
+            net *= max(0.0, 1 + t["ret"])
         net -= 1.0
+        rets = [float(t["ret"]) for t in sub]
+        mean_ret = sum(rets) / n
+        variance = sum((value - mean_ret) ** 2 for value in rets) / (n - 1) if n > 1 else 0.0
+        std = math.sqrt(variance)
+        downside_dev = math.sqrt(sum(min(0.0, value) ** 2 for value in rets) / n)
+        sharpe = mean_ret / std if std > 0 else None
+        sortino = mean_ret / downside_dev if downside_dev > 0 else None
         reg = {}
         for t in sub:
             reg.setdefault(t["regime"], {"n": 0, "net": 1.0})
             reg[t["regime"]]["n"] += 1
-            reg[t["regime"]]["net"] *= (1 + t["ret"])
-        for k in reg:
-            reg[k]["net"] -= 1.0
-        return {"n": n, "win": len(wins), "win_rate": win_rate,
-                "avg_win": avg_win, "avg_loss": avg_loss,
-                "profit_factor": pf, "net": net, "regime": reg}
+            reg[t["regime"]]["net"] *= max(0.0, 1 + t["ret"])
+        for key in reg:
+            reg[key]["net"] -= 1.0
+        return {
+            "n": n, "win": len(wins), "win_rate": win_rate,
+            "win_rate_ci95": _wilson_interval(len(wins), n),
+            "avg_win": avg_win, "avg_loss": avg_loss,
+            "profit_factor": pf, "profit_factor_unbounded": pf_unbounded,
+            "expectancy": mean_ret,
+            "payoff_ratio": (avg_win / abs(avg_loss) if avg_loss < 0 else None),
+            "sharpe_per_trade": sharpe, "sortino_per_trade": sortino,
+            "risk_metric_basis": "per-trade returns; not annualized",
+            "net": net, "regime": reg,
+        }
 
-    # 最大回撤（基于 equity 曲线）
     peak = equity[0]
     mdd = 0.0
-    for e in equity:
-        if e > peak:
-            peak = e
-        dd = (peak - e) / peak
-        if dd > mdd:
-            mdd = dd
+    for value in equity:
+        peak = max(peak, value)
+        dd = (peak - value) / peak if peak > 0 else 0.0
+        mdd = max(mdd, dd)
 
     return {
         "n_trades": len(trades),
@@ -524,12 +721,13 @@ def _summarize(trades, equity, oos_split_idx, bars):
         "equity_final": equity[-1],
         "buy_hold": bh,
         "full_net": full_net,
-        "excess": excess,   # 相对买入持有超额（主放行指标 g4 的数据源）
+        "excess": excess,
         "insample": stats(insample),
         "oos": stats(oos),
+        "monte_carlo": ({"full": _monte_carlo(trades), "oos": _monte_carlo(oos)} if compute_stress else None),
+        "slippage_sensitivity": (_slippage_sensitivity(trades) if compute_stress else None),
         "trades": trades,
     }
-
 
 # ---------------------------------------------------------------------------
 # 6. 三道关卡 + 反过拟合
@@ -598,15 +796,14 @@ def evaluate_gates(strategy, summary, ctx):
 
 
 def _sensitivity(strategy, ctx):
-    """对策略关键参数做 ±扰动，比较样本内净收益。"""
+    """对策略关键参数做 ±扰动；每次都使用全新实例，避免状态复用。"""
     base_cls = strategy.__class__
-    base_params = dict(getattr(strategy, "params", {}))
-    # 找可作 ±扰动的数字参数
+    base_params = dict(getattr(strategy, "params", {}) or {})
     numeric = {k: v for k, v in base_params.items() if isinstance(v, (int, float))}
     if not numeric:
         return {"suspect": False, "note": "无可调数字参数", "swings": {}}
-    # 用样本内部分快速重跑（传 ctx 全量，但仅看 net 作为代理）
-    base_sum = simulate(strategy, ctx, len(ctx.bars))  # 复用全量仅取 net 量级
+
+    base_sum = simulate(base_cls(**base_params), ctx, len(ctx.bars), compute_stress=False)
     base_net = base_sum["insample"]["net"] if base_sum["insample"]["n"] else base_sum["n_trades"]
     swings = {}
     suspect = False
@@ -623,12 +820,12 @@ def _sensitivity(strategy, ctx):
                 variant = base_cls(**{**base_params, k: nv})
             except Exception:
                 continue
-            s = simulate(variant, ctx, len(ctx.bars))
-            vnet = s["insample"]["net"] if s["insample"]["n"] else 0.0
+            result = simulate(variant, ctx, len(ctx.bars), compute_stress=False)
+            vnet = result["insample"]["net"] if result["insample"]["n"] else 0.0
             swings[f"{k}:{v}->{nv}"] = round(vnet, 4)
             if base_net not in (0, None):
                 rel = abs(vnet - base_net) / abs(base_net)
-                if rel > 1.0 or (base_net > 0) != (vnet > 0):
+                if rel > 0.5 or (base_net > 0) != (vnet > 0):
                     suspect = True
     note = "调参后净收益变化>50%或变号，标「可疑」" if suspect else "调参敏感性在可接受范围"
     return {"suspect": suspect, "note": note, "swings": swings}
@@ -700,6 +897,28 @@ def build_card(strategy, summary, gates, overfit, sources, symbol, excess=None):
         "sources": sources,
         "excess": excess,
         "survived": survived,
+        "metrics": {
+            "insample": {
+                "win_rate": summary["insample"].get("win_rate"),
+                "win_rate_ci95": summary["insample"].get("win_rate_ci95"),
+                "expectancy": summary["insample"].get("expectancy"),
+                "profit_factor": summary["insample"].get("profit_factor"),
+                "profit_factor_unbounded": summary["insample"].get("profit_factor_unbounded"),
+                "sharpe_per_trade": summary["insample"].get("sharpe_per_trade"),
+                "sortino_per_trade": summary["insample"].get("sortino_per_trade"),
+            },
+            "oos": {
+                "win_rate": summary["oos"].get("win_rate"),
+                "win_rate_ci95": summary["oos"].get("win_rate_ci95"),
+                "expectancy": summary["oos"].get("expectancy"),
+                "profit_factor": summary["oos"].get("profit_factor"),
+                "profit_factor_unbounded": summary["oos"].get("profit_factor_unbounded"),
+                "sharpe_per_trade": summary["oos"].get("sharpe_per_trade"),
+                "sortino_per_trade": summary["oos"].get("sortino_per_trade"),
+            },
+            "monte_carlo": summary.get("monte_carlo"),
+            "slippage_sensitivity": summary.get("slippage_sensitivity"),
+        },
     }
 
 
@@ -709,6 +928,23 @@ def format_card(card):
     lines.append(f"- **过了几关**：{card['passed']}")
     lines.append(f"- **死因 / 活下来理由**：{card['death_or_alive']}")
     lines.append(f"- **最大风险**：{card['max_risk']}")
+    metrics = card.get("metrics") or {}
+    ins = metrics.get("insample") or {}
+    oos = metrics.get("oos") or {}
+    ci = ins.get("win_rate_ci95") or {}
+    if ins.get("win_rate") is not None:
+        ci_text = f"（95% Wilson CI {ci.get('lower', 0):.1%}–{ci.get('upper', 0):.1%}）" if ci else ""
+        pf = "∞" if ins.get("profit_factor_unbounded") else _fmt_ratio(ins.get("profit_factor"))
+        lines.append(f"- **样本内质量**：胜率 {ins['win_rate']:.1%}{ci_text}；Expectancy {_fmt_pct(ins.get('expectancy'))}；PF {pf}；Sharpe/Sortino（每笔）{_fmt_pct(ins.get('sharpe_per_trade'))}/{_fmt_pct(ins.get('sortino_per_trade'))}")
+    if oos.get("win_rate") is not None:
+        lines.append(f"- **OOS 质量**：胜率 {oos['win_rate']:.1%}；Expectancy {_fmt_pct(oos.get('expectancy'))}；PF {'∞' if oos.get('profit_factor_unbounded') else _fmt_ratio(oos.get('profit_factor'))}")
+    mc = (metrics.get("monte_carlo") or {}).get("full") or {}
+    if mc.get("status") == "ESTIMATE":
+        lines.append(f"- **Monte Carlo（交易收益 bootstrap）**：终值 P05/P50/P95 {_fmt_pct(mc.get('terminal_return_p05'))}/{_fmt_pct(mc.get('terminal_return_p50'))}/{_fmt_pct(mc.get('terminal_return_p95'))}；亏损路径概率 {_fmt_pct(mc.get('probability_of_loss'))}；MDD P95 {_fmt_pct(mc.get('max_drawdown_p95'))}")
+    slip = metrics.get("slippage_sensitivity") or []
+    slip20 = next((item for item in slip if item.get("extra_slippage_bps_per_side") == 20), None)
+    if slip20:
+        lines.append(f"- **滑点压力**：额外每边 20 bps 后净收益 {_fmt_pct(slip20.get('net_return'))}")
     if card.get("excess") is not None:
         ex = card["excess"]
         lines.append(f"- **相对买入持有（超额收益）**：{ex*100:+.2f}%（策略样本内 − 同窗口买入持有；正数=跑赢 Beta）")
@@ -722,6 +958,12 @@ def _fmt_pct(x):
     if x is None:
         return "未知(样本不足)"
     return f"{x:.2%}"
+
+
+def _fmt_ratio(x):
+    if x is None:
+        return "未知"
+    return f"{x:.2f}"
 
 
 def build_morning_report(cards, fng_now, fng_prev, stable, sources_note, gen_time):
